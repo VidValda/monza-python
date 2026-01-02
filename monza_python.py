@@ -1,368 +1,321 @@
 import numpy as np
-import scipy.io as sio
-from scipy.optimize import fsolve
+import json
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from scipy.interpolate import interp1d
 
-# --- 1. CONFIGURATION & CONSTANTS ---
-DT = 0.005
-T_TOTAL = 60
-STEPS = int(T_TOTAL / DT)
-G = 9.8
-M = 0.007
-C_V = 0.01
+# --- 1. DATA LOADING & PROCESSING ---
 
-# Offsets for each floor (Height difference constants from solver.m)
-# Floor 1 falls to 2 (+0.0229 or similar offset logic)
-# Based on solver.m logic:
-OFFSETS = {
-    1: 0.0686,   # Target floor 1? (Not used usually)
-    2: 0.0229,   # Target floor 2
-    3: -0.0229,  # Target floor 3
-    4: -0.0686,  # Target floor 4
-    5: -0.1143,  # Target floor 5
-    6: 0.1600    # Target floor 6 (This looks like a distinct jump)
-}
-# Note: The solver.m snippet had specific offsets for specific cases. 
-# We will match the switch-case logic in the solver function below.
-
-def load_data():
-    """Loads .mat files and organizes track geometry."""
+def process_json_data(diff_filename, circ_filename):
+    """
+    Parses the JSON content and creates interpolation functions for physics.
+    """
+    # NOTE: In a local environment, use open(diff_filename).read()
+    # For this demonstration, we assume the content is passed or files exist
     try:
-        mat_diff = sio.loadmat('dificultad1.mat')
-        mat_circ = sio.loadmat('circulos.mat')
-        
-        # Helper to extract and flatten arrays
-        def get_arr(name):
-            return mat_diff[name].flatten()
-        
-        # Organize track limits into a dictionary for easy access
-        tracks = {}
-        tracks[1] = get_arr('xp1')
-        tracks[2] = get_arr('xp2')
-        tracks[3] = get_arr('xp3')
-        tracks[4] = get_arr('xp4')
-        tracks[5] = get_arr('xp5')
-        tracks[6] = get_arr('xp6')
-        tracks[7] = get_arr('xp7')
-        
-        # Visual data
-        visuals = {
-            'xl': [get_arr(f'xl{i}') for i in range(1, 5)],
-            'yl': [get_arr(f'yl{i}') for i in range(1, 5)],
-            'xp': [get_arr(f'xp{i}') for i in range(1, 8)], # Specific tracks
-            'yp': [get_arr(f'yp{i}') for i in range(1, 8)],
-            'xp_base': get_arr('xp'), # Base track
-            'yp_base': get_arr('yp'),
-            'r': [mat_circ[f'r{i}'].flatten() for i in range(1, 5)]
-        }
-        return tracks, visuals
+        with open(diff_filename, 'r') as f:
+            d_data = json.load(f)
+        with open(circ_filename, 'r') as f:
+            c_data = json.load(f)
     except FileNotFoundError:
-        print("Error: .mat files not found. Ensure 'dificultad1.mat' and 'circulos.mat' are present.")
-        return None, None
+        print(f"Error: Could not find {diff_filename} or {circ_filename}")
+        return None
 
-def solver(a, b, v, ang_pos, x_resp, y_resp, target_floor):
-    """
-    Replicates the logic of solver.m to find the impact x-coordinate.
-    Solves for xc where the ballistic trajectory intersects the parabola.
-    """
-    d = x_resp
-    h = y_resp
-    
-    # Determine offset constant C based on solver.m
-    # The solver.m uses: -0.54 * (...) + C
-    C = 0.0
-    if target_floor == 2: C = 0.0229
-    elif target_floor == 3: C = -0.0229
-    elif target_floor == 4: C = -0.0686
-    elif target_floor == 5: C = -0.1143
-    elif target_floor == 6: C = 0.1600 # From user snippet
-    else: C = 0.0 # Default/Fallback
-    
-    # Physics constants for the equation
-    # We want to find xc.
-    # We need to replicate the equation: LHS - RHS = 0
-    # LHS (Rotated Y of projectile): -b*xc + a* (Trajectory_Y_local)
-    # RHS (Track Height): -0.54 * (Rotated X)^2 + C
-    
-    # Trajectory Y relative to launch d (in non-rotated frame relative to launch):
-    # y_traj = (xc - d)*tan(ang) - (g*(xc-d)^2)/(2*v^2*cos(ang)^2) + h
-    # BUT, 'xc' in solver.m seems to be the global X?
-    # Let's look closely at solver.m provided:
-    # solve( (-b*xc + a*(...)) == -0.54 * (a*xc + b*(...)).^2 + C )
-    # It appears 'xc' is indeed the Global X coordinate of the collision.
-    
-    term_g = 9.8 / (2 * v**2 * np.cos(ang_pos)**2)
-    tan_a = np.tan(ang_pos)
-    
-    def equations(xc):
-        # The projectile height at global x = xc
-        dx = xc - d
-        y_proj = dx * tan_a - term_g * dx**2 + h
-        
-        # Convert Global (xc, y_proj) to Local Track Coordinates
-        # x_local = xc * a + y_proj * b
-        # y_local = -xc * b + y_proj * a
-        # Wait, the solver.m inverse might be different depending on definition.
-        # Standard rotation:
-        # x_loc = x*cos + y*sin
-        # y_loc = -x*sin + y*cos
-        # In solver.m:
-        # LHS (y_loc) = -b*xc + a*y_proj  (Matches -x*sin + y*cos)
-        # RHS (Parabola) = -0.54 * (a*xc + b*y_proj)^2 + C  (Matches -0.54 * x_loc^2 + C)
-        
-        x_loc = xc * a + y_proj * b
-        y_loc = -xc * b + y_proj * a
-        
-        return y_loc - (-0.54 * x_loc**2 + C)
-
-    # Initial guess: slightly away from launch x
-    xc_guess = d + 0.1
-    if target_floor % 2 == 0: # Even floors usually to the left
-        xc_guess = d - 0.1
-        
-    xc_solution = fsolve(equations, xc_guess)[0]
-    
-    # Calculate corresponding y and local coordinates
-    dx = xc_solution - d
-    y_solution = dx * tan_a - term_g * dx**2 + h
-    
-    x_local_hit = xc_solution * a + y_solution * b
-    y_local_hit = -xc_solution * b + y_solution * a
-    
-    return xc_solution, y_solution, x_local_hit
-
-def run_simulation():
-    track_limits, visuals = load_data()
-    if not track_limits: return
-
-    # --- State Variables ---
-    piso = 1
-    # Start at the minimum X of floor 1 + epsilon
-    x = np.min(track_limits[1]) + 0.001 
-    dxt = 0.0 # Velocity
-    
-    cont = 100 # 100=Waiting, 0=Rolling, 1=Falling
-    
-    # Fall variables
-    x_resp, y_resp = 0.0, 0.0
-    vx_glob, vy_glob = 0.0, 0.0
-    t_drop = 0.0
-    target_x_glob, target_y_glob = 0.0, 0.0
-    
-    # Storage for animation
-    history = {
-        'x': [], 'y': [], 'piso': [], 'angle': []
+    sim_data = {
+        'floors': {},
+        'visuals': []
     }
+
+    # 1. Process Floors (Physics & Visuals)
+    # The JSON keys are 'xp1', 'yp1' etc.
+    for i in range(1, 8):
+        x_key = f'xp{i}'
+        y_key = f'yp{i}'
+        
+        if x_key in d_data and y_key in d_data:
+            # Flatten lists (JSON gives [[x,x,x]])
+            x_arr = np.array(d_data[x_key]).flatten()
+            y_arr = np.array(d_data[y_key]).flatten()
+            
+            # Sort by x for valid interpolation
+            sort_idx = np.argsort(x_arr)
+            x_arr = x_arr[sort_idx]
+            y_arr = y_arr[sort_idx]
+
+            # Create interpolation function for physics (Height y given x)
+            # fill_value="extrapolate" allows us to detect when we fall off
+            f_interp = interp1d(x_arr, y_arr, kind='cubic', fill_value="extrapolate")
+            
+            # Calculate slope (derivative) for physics
+            # dy/dx approximation
+            dx_arr = np.gradient(x_arr)
+            dy_arr = np.gradient(y_arr)
+            # Avoid division by zero
+            dx_arr[dx_arr == 0] = 1e-9
+            slope_arr = dy_arr / dx_arr
+            s_interp = interp1d(x_arr, slope_arr, kind='linear', fill_value="extrapolate")
+
+            sim_data['floors'][i] = {
+                'x': x_arr,
+                'y': y_arr,
+                'func_y': f_interp,
+                'func_slope': s_interp,
+                'x_min': x_arr[0],
+                'x_max': x_arr[-1]
+            }
+            sim_data['visuals'].append((x_arr, y_arr))
+
+    # 2. Process Static Lines (Visuals only)
+    # xl1, yl1 ...
+    for i in range(1, 10): # Arbitrary range to catch all xl/yl
+        xk = f'xl{i}'
+        yk = f'yl{i}'
+        if xk in d_data and yk in d_data:
+            sim_data['visuals'].append((
+                np.array(d_data[xk]).flatten(), 
+                np.array(d_data[yk]).flatten()
+            ))
+
+    # 3. Process Base (xp, yp)
+    if 'xp' in d_data and 'yp' in d_data:
+        sim_data['visuals'].append((
+            np.array(d_data['xp']).flatten(),
+            np.array(d_data['yp']).flatten()
+        ))
+
+    # 4. Process Circles
+    # JSON has r1, r2, r3... Assumed pairs (r1=x, r2=y), (r3=x, r4=y)
+    r_keys = sorted([k for k in c_data.keys() if k.startswith('r')], key=lambda x: int(x[1:]))
+    for i in range(0, len(r_keys), 2):
+        if i+1 < len(r_keys):
+            x_c = np.array(c_data[r_keys[i]]).flatten()
+            y_c = np.array(c_data[r_keys[i+1]]).flatten()
+            sim_data['visuals'].append((x_c, y_c))
+
+    return sim_data
+
+# --- 2. PHYSICS CONSTANTS ---
+DT = 0.01        # Time step
+G = 9.81         # Gravity
+M = 0.01         # Mass
+FRICTION = 0.05  # Resistive force coef
+ROT_SPEED = 0.5  # Amplitude of rotation
+FREQ = 0.5       # Frequency of rotation
+
+# --- 3. TRANSFORMATION MATH ---
+
+def to_global(x_loc, y_loc, angle):
+    c, s = np.cos(angle), np.sin(angle)
+    x_g = x_loc * c - y_loc * s
+    y_g = x_loc * s + y_loc * c
+    return x_g, y_g
+
+def to_local(x_g, y_g, angle):
+    c, s = np.cos(angle), np.sin(angle)
+    x_l = x_g * c + y_g * s
+    y_l = -x_g * s + y_g * c
+    return x_l, y_l
+
+# --- 4. SIMULATION LOOP ---
+
+def run_simulation(data):
+    # Initial State
+    current_floor_idx = 1
+    floor_data = data['floors'][current_floor_idx]
     
-    print("Starting simulation...")
+    # Start slightly off-center to ensure movement
+    x_local = 0.005 
+    y_local = float(floor_data['func_y'](x_local))
+    v_local = 0.0 # Velocity along the curve (tangential speed roughly)
     
-    for step in range(STEPS):
+    # Global State
+    x_glob, y_glob = 0, 0
+    vx_glob, vy_glob = 0, 0
+    
+    state = "ROLLING" # ROLLING, FALLING
+    
+    history = {'x': [], 'y': [], 'angle': [], 'state': []}
+    
+    # Max simulation time
+    steps = 1000 
+    
+    for step in range(steps):
         t = step * DT
         
-        # A. INPUT (Rotation)
-        giro = 0.5 * np.sin(t * 0.5)
-        a = np.cos(giro)
-        b = np.sin(giro)
+        # Calculate System Rotation
+        # Angle oscillates
+        theta = ROT_SPEED * np.sin(FREQ * t)
+        omega = ROT_SPEED * FREQ * np.cos(FREQ * t) # Angular velocity (d(theta)/dt)
         
-        # B. COORD TRANSFORMS
-        y_local = -0.54 * x**2
-        xo = x * a - y_local * b
-        yo = x * b + y_local * a
-        
-        # C. STATE MACHINE
-        if cont == 100:
-            # WAITING STATE
-            if step > 50: # Simple start delay
-                cont = 0
-                dxt = 0.05
-            
-            history['x'].append(xo)
-            history['y'].append(yo)
-            history['piso'].append(piso)
-            history['angle'].append(giro)
+        # --- STATE: ROLLING ---
+        if state == "ROLLING":
+            # 1. Get Geometry from Data Interpolation
+            try:
+                floor_y = float(floor_data['func_y'](x_local))
+                slope = float(floor_data['func_slope'](x_local))
+            except:
+                state = "FALLING" # Error fallback
+                continue
 
-        elif cont == 0:
-            # ROLLING STATE
-            theta = np.arctan(-1.08 * x)
-            # Equations of motion
-            # gravity term: -sin(theta + alpha)
-            # friction: -cv * v
-            d2xt = G * -np.sin(theta + giro) - (C_V / M) * dxt
-            dxt += d2xt * DT
-            x += dxt * DT
+            # Slope Angle (local tangent angle)
+            alpha_local = np.arctan(slope)
             
-            # Limit Check (The "Deep Fix")
-            # We use the loaded arrays exactly
-            limits = track_limits[piso]
-            min_x, max_x = np.min(limits), np.max(limits)
+            # Total angle relative to gravity (Global Vertical)
+            # Gravity acts down (-90 deg global). Slope is alpha + theta.
+            # Component of gravity pulling along slope:
+            # g_tangent = -g * sin(alpha_local + theta)
+            g_force = -G * np.sin(alpha_local + theta)
             
-            falling = False
+            # Friction (Viscous damping for stability)
+            f_force = -FRICTION * v_local
             
-            # Tolerance 1mm
-            if x > (max_x + 0.001) or x < (min_x - 0.001):
-                falling = True
+            # Update Local Physics
+            accel = g_force + f_force
+            v_local += accel * DT
+            x_local += v_local * DT
             
-            # Safety for start/end
-            if piso == 1 and x < min_x: 
-                # Reset if trying to fall off start
-                x = min_x + 0.001
-                dxt = 0
-                falling = False
+            # Update Y based on track constraint
+            y_local = float(floor_data['func_y'](x_local))
             
-            if piso == 7 and falling:
-                print("Finished Track!")
+            # Calculate Global Position for Rendering
+            x_glob, y_glob = to_global(x_local, y_local, theta)
+            
+            # --- CHECK BOUNDS (Did we fall off?) ---
+            if x_local < floor_data['x_min'] or x_local > floor_data['x_max']:
+                state = "FALLING"
+                
+                # TRANSFORM VELOCITY TO GLOBAL
+                # 1. Relative Velocity Vector (tangent to local curve)
+                # v_x_rel = v_local * cos(alpha) -> approximately just v_local for small slopes projected on x
+                # A better approx: dx/dt = v_local (roughly), dy/dt = slope * v_local
+                vx_rel_local = v_local
+                vy_rel_local = slope * v_local
+                
+                # Rotate Relative Velocity to Global Frame
+                vx_rel_glob, vy_rel_glob = to_global(vx_rel_local, vy_rel_local, theta)
+                
+                # 2. Add Tangential Velocity from Rotation (v = omega x r)
+                # r vector is (x_glob, y_glob)
+                # cross product in 2D: (-omega*y, omega*x)
+                vx_tan = -omega * y_glob
+                vy_tan = omega * x_glob
+                
+                # Total Global Launch Velocity
+                vx_glob = vx_rel_glob + vx_tan
+                vy_glob = vy_rel_glob + vy_tan
+                
+        
+        # --- STATE: FALLING ---
+        elif state == "FALLING":
+            # Simple Ballistic Trajectory in Global Frame
+            # Gravity acts purely on Global Y
+            vy_glob -= G * DT
+            
+            x_glob += vx_glob * DT
+            y_glob += vy_glob * DT
+            
+            # Check Collision with NEXT Floor(s)
+            # We look at all floors to be safe, or just the next logic one
+            # Transform global pos back to local to check height constraint
+            x_loc_check, y_loc_check = to_local(x_glob, y_glob, theta)
+            
+            # Check if we are inside the domain of the next floor (or current)
+            # Usually we fall to floor + 1
+            next_idx = current_floor_idx + 1
+            if next_idx in data['floors']:
+                next_floor = data['floors'][next_idx]
+                
+                # Are we within x-bounds?
+                if next_floor['x_min'] <= x_loc_check <= next_floor['x_max']:
+                    target_y = float(next_floor['func_y'](x_loc_check))
+                    
+                    # Did we cross the line? (Current Y < Track Y) and close enough
+                    if y_loc_check <= target_y + 0.02 and y_loc_check >= target_y - 0.1:
+                        # IMPACT / LANDING
+                        state = "ROLLING"
+                        current_floor_idx = next_idx
+                        floor_data = next_floor
+                        x_local = x_loc_check
+                        y_local = target_y
+                        
+                        # Energy dampening on landing
+                        # Convert global velocity back to local approx
+                        # We just take magnitude and dampen it
+                        v_mag = np.sqrt(vx_glob**2 + vy_glob**2)
+                        # Direction determines sign of new v_local (if moving right globally?)
+                        # Simplifying: dot product with new tangent
+                        slope = float(floor_data['func_slope'](x_local))
+                        # Project global v onto global tangent
+                        glob_slope_angle = np.arctan(slope) + theta
+                        
+                        # Scalar projection
+                        v_local = (vx_glob * np.cos(glob_slope_angle) + 
+                                   vy_glob * np.sin(glob_slope_angle))
+                        
+                        v_local *= 0.8 # Restitution coef (bounce dampening)
+
+            # Safety check: fell off world
+            if y_glob < -0.5:
                 break
 
-            if falling:
-                cont = 1
-                t_drop = 0
-                
-                # Calculate Launch Vectors
-                vx_loc = dxt
-                vy_loc = -1.08 * x * dxt
-                
-                vx_glob = vx_loc * a - vy_loc * b
-                vy_glob = vx_loc * b + vy_loc * a
-                
-                x_resp, y_resp = xo, yo
-                
-                # CALL SOLVER
-                v_mag = np.sqrt(vx_glob**2 + vy_glob**2)
-                ang_v = np.arctan2(vy_glob, vx_glob)
-                
-                # Predict impact on next floor
-                if piso < 7:
-                    tx, ty, t_loc = solver(a, b, v_mag, ang_v, x_resp, y_resp, piso + 1)
-                    target_x_glob, target_y_glob = tx, ty
-                    # Store the local X impact to snap to it later
-                    target_x_local_snap = t_loc
-                else:
-                    target_x_glob = 0 # Fall into abyss
-            
-            history['x'].append(xo)
-            history['y'].append(yo)
-            history['piso'].append(piso)
-            history['angle'].append(giro)
+        # Record History
+        history['x'].append(x_glob)
+        history['y'].append(y_glob)
+        history['angle'].append(theta)
+        history['state'].append(state)
 
-        elif cont == 1:
-            # FALLING STATE
-            t_drop += DT
-            
-            xo = x_resp + vx_glob * t_drop
-            yo = y_resp + vy_glob * t_drop - 0.5 * G * t_drop**2
-            
-            # Check Impact
-            dist = np.sqrt((xo - target_x_glob)**2 + (yo - target_y_glob)**2)
-            
-            # Impact Logic: Distance < 5cm OR passed height
-            if dist < 0.05 or (yo < target_y_glob - 0.02):
-                if piso < 7:
-                    cont = 0
-                    piso += 1
-                    
-                    # Snap to track
-                    x = target_x_local_snap
-                    
-                    # Energy Loss
-                    v_impact = np.sqrt(vx_glob**2 + (vy_glob - G*t_drop)**2)
-                    dxt = v_impact * 0.7
-                    
-                    # Direction logic (Odd floors right, Even left)
-                    if piso in [2, 4, 6]:
-                        dxt = -abs(dxt)
-                    else:
-                        dxt = abs(dxt)
-                else:
-                    # End of simulation
-                    print("Fell off world.")
-                    break
-            
-            history['x'].append(xo)
-            history['y'].append(yo)
-            history['piso'].append(piso)
-            history['angle'].append(giro)
+    return history
 
-    return history, visuals
+# --- 5. ANIMATION ---
 
-# --- 2. ANIMATION ---
-def animate(history, visuals):
-    if not history: return
+def animate(history, sim_data):
+    if not history['x']:
+        print("No simulation data generated.")
+        return
 
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.set_xlim(-0.3, 0.3)
     ax.set_ylim(-0.3, 0.3)
     ax.set_aspect('equal')
-    ax.grid(True)
+    ax.grid(True, alpha=0.3)
     
-    # Static Background (Gray Circles)
-    for r in visuals['r']:
-        x_vals = r[0::2]
-        y_vals = r[1::2]
-        # Ensure both arrays have the same length (handle odd-length arrays)
-        min_len = min(len(x_vals), len(y_vals))
-        ax.plot(x_vals[:min_len], y_vals[:min_len], color='#d3d3d3', linewidth=1, zorder=0) 
-        # Note: r1 in matlab is often x,y pairs or radius. Assuming plot(x,y).
-        # Adjust indexing based on actual mat structure if needed.
-        # Often circulos.mat has r1 as X and r2 as Y.
-    
-    # Plot objects that will update
-    line_objects = []
-    
-    # We have multiple segments to draw:
-    # 4 straight lines (xl) and 7+1 parabolas (xp)
-    # We create a list of Line2D objects
-    num_segments = len(visuals['xl']) + len(visuals['xp']) + 1 # +1 for base
-    for _ in range(num_segments):
-        ln, = ax.plot([], [], 'b-', linewidth=1.5)
-        line_objects.append(ln)
+    # Create line objects for all visual segments
+    lines = []
+    for _ in sim_data['visuals']:
+        ln, = ax.plot([], [], 'k-', lw=1)
+        lines.append(ln)
         
-    coin_dot, = ax.plot([], [], 'ro', markersize=8, zorder=10)
-    title_text = ax.set_title("")
-
-    def rotate(x, y, ang):
-        ca, cb = np.cos(ang), np.sin(ang)
-        rx = x * ca - y * cb
-        ry = x * cb + y * ca
-        return rx, ry
+    ball, = ax.plot([], [], 'ro', ms=6, zorder=10)
+    title = ax.set_title("")
 
     def update(frame):
-        # Current angle
-        ang = history['angle'][frame]
+        angle = history['angle'][frame]
         
-        idx = 0
-        
-        # Draw Straight Segments (xl1..xl4)
-        for i in range(len(visuals['xl'])):
-            rx, ry = rotate(visuals['xl'][i], visuals['yl'][i], ang)
-            line_objects[idx].set_data(rx, ry)
-            idx += 1
+        # Update all floor/visual lines based on current rotation
+        for i, (lx, ly) in enumerate(sim_data['visuals']):
+            gx, gy = to_global(lx, ly, angle)
+            lines[i].set_data(gx, gy)
             
-        # Draw Base Track (xp)
-        rx, ry = rotate(visuals['xp_base'], visuals['yp_base'], ang)
-        line_objects[idx].set_data(rx, ry)
-        idx += 1
+        # Update ball
+        ball.set_data([history['x'][frame]], [history['y'][frame]])
+        title.set_text(f"State: {history['state'][frame]}")
         
-        # Draw Floor Tracks (xp1..xp7)
-        for i in range(len(visuals['xp'])):
-            rx, ry = rotate(visuals['xp'][i], visuals['yp'][i], ang)
-            line_objects[idx].set_data(rx, ry)
-            idx += 1
-            
-        # Draw Coin
-        coin_dot.set_data([history['x'][frame]], [history['y'][frame]])
-        
-        title_text.set_text(f"Floor: {history['piso'][frame]} | Time: {frame*DT:.2f}s")
-        return line_objects + [coin_dot, title_text]
+        return lines + [ball, title]
 
-    # Create Animation
-    # Skip frames for speed (interval=20ms roughly 50fps)
-    ani = FuncAnimation(fig, update, frames=range(0, len(history['x']), 5),
-                        interval=20, blit=True)
-    
+    # Skip frames for speed (interval in ms)
+    ani = FuncAnimation(fig, update, frames=range(0, len(history['x']), 2), 
+                        interval=10, blit=True)
     plt.show()
 
+# --- MAIN EXECUTION ---
 if __name__ == "__main__":
-    hist, vis = run_simulation()
-    if hist:
-        animate(hist, vis)
+    # IMPORTANT: Ensure 'dificultad1.json' and 'circulos.json' are in the working directory
+    # or create dummy files here for testing.
+    
+    processed_data = process_json_data('dificultad1.json', 'circulos.json')
+    
+    if processed_data:
+        print("Data loaded successfully. Starting simulation...")
+        hist = run_simulation(processed_data)
+        print(f"Simulation finished with {len(hist['x'])} frames.")
+        animate(hist, processed_data)
