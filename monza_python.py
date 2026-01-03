@@ -15,6 +15,7 @@ class Level:
             with open(d_path, 'r') as f: d_data = json.load(f)
             with open(c_path, 'r') as f: c_data = json.load(f)
         except FileNotFoundError:
+            print(f"Error: Files {d_path} or {c_path} not found")
             return
 
         for i in range(0, 20):
@@ -65,7 +66,7 @@ class PhysicsBall:
         self.lv = 0.0
         self.gx, self.gy = 0.0, 0.0
         self.gvx, self.gvy = 0.0, 0.0
-        self.params = {'dt': 0.01, 'g': 9.81, 'fric': 0.05, 'rest': 0.6}
+        self.params = {'dt': 0.01, 'g': 9.81, 'fric': 0.01, 'rest': 0.3}
 
     def _to_global(self, lx, ly, ang):
         c, s = np.cos(ang), np.sin(ang)
@@ -82,6 +83,7 @@ class PhysicsBall:
 
         for _ in range(sub_steps):
             if self.state == "ROLLING":
+                if self.idx not in self.lvl.floors: self.state = "FALLING"; continue
                 floor = self.lvl.floors[self.idx]
                 slope = float(floor['slope'](self.lx))
                 alpha = np.arctan(slope)
@@ -142,34 +144,82 @@ class PhysicsBall:
                                     ty = np.sin(floor_angle)
                                     self.lv = self.gvx * tx + self.gvy * ty
                                     break
-
         return self.gx, self.gy
 
-def run_visuals(level, ball):
-    hist = {'x': [], 'y': [], 'angle': []}
-    steps = 600
-    
-    for s in range(steps):
-        t = s * 0.01
-        angle = -0.05 * np.sin(50.0 * t)
-        omega = -0.05 * np.cos(50.0 * t)
+class PIDController:
+    def __init__(self, kp, ki, kd, setpoint=0.0):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.setpoint = setpoint
+        self.integral = 0
+        self.max_integral = 1.0
+
+    def compute(self, measurement, derivative_measurement, dt):
+        error = self.setpoint - measurement
+        self.integral += error * dt
+        self.integral = np.clip(self.integral, -self.max_integral, self.max_integral)
         
-        gx, gy = ball.update(angle, omega)
+        output = (self.kp * error) + (self.ki * self.integral) + (-self.kd * derivative_measurement)
+        return output
+    
+    def reset(self):
+        self.integral = 0
+
+def run_controlled_simulation(level, ball):
+    pid = PIDController(kp=5, ki=0, kd=0.5, setpoint=-0.11)
+    
+    hist = {'x': [], 'y': [], 'angle': [], 'target': []}
+    steps = 1000
+    dt = 0.01
+    current_angle = 0.0
+    
+    print("Simulando...")
+    for s in range(steps):
+        target_angle = 0.0
+        
+        if ball.state == "ROLLING":
+            control_output = pid.compute(ball.lx, ball.lv, dt)
+            target_angle = -control_output
+            
+            max_ang = np.radians(45)
+            target_angle = np.clip(target_angle, -max_ang, max_ang)
+        else:
+            target_angle = 0.0
+            pid.reset()
+
+        angle_diff = target_angle - current_angle
+        omega = angle_diff / dt 
+        
+        max_omega = 10.0 
+        omega = np.clip(omega, -max_omega, max_omega)
+        
+        new_angle = current_angle + omega * dt
+        
+        gx, gy = ball.update(new_angle, omega)
+        current_angle = new_angle
         
         hist['x'].append(gx)
         hist['y'].append(gy)
-        hist['angle'].append(angle)
+        hist['angle'].append(current_angle)
         
-        if gy < -1.0: break
+        tx, ty = ball._to_global(0, ball.ly if ball.state=="ROLLING" else 0, current_angle)
+        hist['target'].append((tx, ty))
+        
+        if gy < -1.5:
+            print("La bola se cayó del sistema.")
+            break
 
     fig, ax = plt.subplots(figsize=(8, 8))
-    ax.set_xlim(-0.4, 0.4)
-    ax.set_ylim(-0.4, 0.4)
+    ax.set_xlim(-0.5, 0.5)
+    ax.set_ylim(-0.5, 0.5)
     ax.set_aspect('equal')
     ax.grid(True, alpha=0.3)
+    ax.set_title("Control PID")
 
-    lines = [ax.plot([], [], 'k-', lw=1)[0] for _ in level.visuals]
-    dot, = ax.plot([], [], 'ro', markersize=6, zorder=10)
+    lines = [ax.plot([], [], 'k-', lw=1.5)[0] for _ in level.visuals]
+    dot, = ax.plot([], [], 'ro', markersize=8, zorder=10)
+    target_mark, = ax.plot([], [], 'g+', markersize=10, markeredgewidth=2)
     trace, = ax.plot([], [], 'r-', lw=0.5, alpha=0.5)
 
     def anim(f):
@@ -179,8 +229,12 @@ def run_visuals(level, ball):
             ln.set_data(gx, gy)
         
         dot.set_data([hist['x'][f]], [hist['y'][f]])        
-        trace.set_data(hist['x'][:f], hist['y'][:f])
-        return lines + [dot, trace]
+        trace.set_data(hist['x'][max(0, f-50):f], hist['y'][max(0, f-50):f])
+        
+        tx, ty = hist['target'][f]
+        target_mark.set_data([tx], [ty])
+        
+        return lines + [dot, trace, target_mark]
 
     ani = FuncAnimation(fig, anim, frames=len(hist['x']), interval=20, blit=True)
     plt.show()
@@ -188,4 +242,4 @@ def run_visuals(level, ball):
 if __name__ == "__main__":
     lvl = Level('dificultad1.json', 'circulos.json')
     sim = PhysicsBall(lvl, start_idx=0)
-    run_visuals(lvl, sim)
+    run_controlled_simulation(lvl, sim)
