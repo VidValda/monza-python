@@ -19,23 +19,19 @@ class Level:
 
         for i in range(0, 20):
             xk, yk = f'xp{i}', f'yp{i}'
-            if i == 0:
-                xk, yk = 'xp','yp'
-                       
+            if i == 0: xk, yk = 'xp','yp'
             if xk in d_data and yk in d_data:
                 x = np.array(d_data[xk]).flatten()
                 y = np.array(d_data[yk]).flatten()
                 idx = np.argsort(x)
                 x, y = x[idx], y[idx]
-                
                 dx = np.gradient(x)
                 dx[dx == 0] = 1e-9
                 slope = np.gradient(y) / dx
-                
                 self.floors[i] = {
                     'func': interp1d(x, y, kind='cubic', fill_value="extrapolate"),
                     'slope': interp1d(x, slope, kind='linear', fill_value="extrapolate"),
-                    'min': x[0], 
+                    'min': x[0],
                     'max': x[-1]
                 }
                 self.visuals.append((x, y))
@@ -53,13 +49,18 @@ class Level:
                 self.visuals.append((np.array(c_data[r_keys[i]]).flatten(), np.array(c_data[r_keys[i+1]]).flatten()))
 
 class PhysicsBall:
-    def __init__(self, level):
+    def __init__(self, level, start_idx=0):
         self.lvl = level
-        self.idx = 2
+        self.idx = start_idx
         self.state = "ROLLING"
-        self.lx = 0.001        
-        self.ly = float(self.lvl.floors[self.idx]['func'](self.lx))
-
+        self.lx = 0.01
+        
+        if self.idx in self.lvl.floors:
+            self.ly = float(self.lvl.floors[self.idx]['func'](self.lx))
+        else:
+            self.idx = -1
+            self.ly = 0.0
+            self.state = "FALLING"
 
         self.lv = 0.0
         self.gx, self.gy = 0.0, 0.0
@@ -108,9 +109,7 @@ class PhysicsBall:
                 self.gx += self.gvx * dt
                 self.gy += self.gvy * dt
                 
-                for f_idx, floor in self.lvl.floors.items():
-                    if f_idx == self.idx and self.state == "ROLLING": continue 
-
+                for f_idx, floor in self.lvl.floors.items():    
                     lx_chk, ly_chk = self._to_local(self.gx, self.gy, angle)
                     
                     if floor['min'] <= lx_chk <= floor['max']:
@@ -152,8 +151,8 @@ def run_visuals(level, ball):
     
     for s in range(steps):
         t = s * 0.01
-        angle = 0.2 * np.sin(4 * t)
-        omega = 0.2 * np.cos(4 * t)
+        angle = -0.05 * np.sin(50.0 * t)
+        omega = -0.05 * np.cos(50.0 * t)
         
         gx, gy = ball.update(angle, omega)
         
@@ -188,6 +187,5 @@ def run_visuals(level, ball):
 
 if __name__ == "__main__":
     lvl = Level('dificultad1.json', 'circulos.json')
-    if lvl.floors:
-        sim = PhysicsBall(lvl)
-        run_visuals(lvl, sim)
+    sim = PhysicsBall(lvl, start_idx=0)
+    run_visuals(lvl, sim)
