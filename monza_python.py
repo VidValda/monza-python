@@ -56,9 +56,9 @@ class Level:
 class PhysicsBall:
     def __init__(self, level):
         self.lvl = level
-        self.idx = 1
+        self.idx = 0
         self.state = "ROLLING"
-        self.lx = -0.01
+        self.lx = 0.01
         
         self.ly = float(self.lvl.floors[self.idx]['func'](self.lx))
         
@@ -112,7 +112,7 @@ class PhysicsBall:
                 if floor['min'] <= lx_chk <= floor['max']:
                     target_y = float(floor['func'](lx_chk))
                     
-                    if ly_chk <= target_y + 0.05 and ly_chk >= target_y - 0.1:
+                    if ly_chk <= target_y + 0.005 and ly_chk >= target_y - 0.01: #collision detection with tolerance
                         self.state = "ROLLING"
                         self.idx = f_idx
                         self.lx, self.ly = lx_chk, target_y
@@ -122,7 +122,7 @@ class PhysicsBall:
                         
                         v_mag = np.sqrt(self.gvx**2 + self.gvy**2)
                         
-                        self.lv = (self.gvx * np.cos(glob_slope) + self.gvy * np.sin(glob_slope)) * 0.8
+                        self.lv = (self.gvx * np.cos(glob_slope) + self.gvy * np.sin(glob_slope)) * 0.9 #impact loss factor
                         collision_found = True
                         break
             
@@ -136,8 +136,8 @@ def run_visuals(level, ball):
     
     for s in range(steps):
         t = s * 0.01
-        angle = -0.2 * np.sin(1 * t)
-        omega = -0.1 * np.cos(1 * t)
+        angle = 0.1 * np.sin(10 * t)
+        omega = 0.1 * np.cos(10 * t)
         
         gx, gy = ball.update(angle, omega)
         
