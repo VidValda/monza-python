@@ -146,52 +146,109 @@ class PhysicsBall:
                                     break
         return self.gx, self.gy
 
-class PIDController:
-    def __init__(self, kp, ki, kd, setpoint=0.0):
-        self.kp = kp
-        self.ki = ki
-        self.kd = kd
-        self.setpoint = setpoint
-        self.integral = 0
-        self.max_integral = 1.0
-
-    def compute(self, measurement, derivative_measurement, dt):
-        error = self.setpoint - measurement
-        self.integral += error * dt
-        self.integral = np.clip(self.integral, -self.max_integral, self.max_integral)
+class FuzzyController:
+    def __init__(self):
+        self.sets_pos = {
+            'NB': -0.3, 'NS': -0.1, 'Z': 0.0, 'PS': 0.1, 'PB': 0.3
+        }
+        self.sets_vel = {
+            'NB': -0.5, 'NS': -0.25, 'Z': 0.0, 'PS': 0.25, 'PB': 0.5
+        }
+        self.sets_out = {
+            'NB': -0.5, 'NS': -0.25, 'Z': 0.0, 'PS': 0.25, 'PB': 0.5
+        }
         
-        output = (self.kp * error) + (self.ki * self.integral) + (-self.kd * derivative_measurement)
-        return output
-    
-    def reset(self):
-        self.integral = 0
+        self.rules = [
+            ('NB', 'NB', 'PB'),
+            ('NB', 'NS', 'PB'),
+            ('NB', 'Z',  'PB'),
+            ('NB', 'PS', 'PB'), 
+            ('NB', 'PB', 'PS'), 
+
+            ('NS', 'NB', 'PB'),
+            ('NS', 'NS', 'PB'),
+            ('NS', 'Z',  'PS'),
+            ('NS', 'PS', 'PS'),
+            ('NS', 'PB', 'Z'),
+
+            ('Z',  'NB', 'PB'),
+            ('Z',  'NS', 'PS'),
+            ('Z',  'Z',  'NB'),
+            ('Z',  'PS', 'NS'),
+            ('Z',  'PB', 'NB'),
+
+            ('PS', 'NB', 'Z'),
+            ('PS', 'NS', 'NS'),
+            ('PS', 'Z',  'NS'),
+            ('PS', 'PS', 'NB'),
+            ('PS', 'PB', 'NB'),
+
+            ('PB', 'NB', 'NS'),
+            ('PB', 'NS', 'NB'),
+            ('PB', 'Z',  'NB'),
+            ('PB', 'PS', 'NB'),
+            ('PB', 'PB', 'NB'),
+        ]
+
+    def _trimf(self, x, abc):
+        a, b, c = abc
+        return max(min((x - a) / (b - a + 1e-9), (c - x) / (c - b + 1e-9)), 0)
+
+    def _get_memberships(self, val, sets):
+        mems = {}
+        keys = list(sets.keys())
+        vals = list(sets.values())
+        
+        for i, k in enumerate(keys):
+            center = vals[i]
+            left = vals[i-1] if i > 0 else center - (vals[i+1]-center)
+            right = vals[i+1] if i < len(vals)-1 else center + (center-vals[i-1])
+            mems[k] = self._trimf(val, [left, center, right])
+        return mems
+
+    def compute(self, pos, vel):
+        m_pos = self._get_memberships(pos, self.sets_pos)
+        m_vel = self._get_memberships(vel, self.sets_vel)
+        
+        numerator = 0.0
+        denominator = 0.0
+        
+        for r_pos, r_vel, r_out in self.rules:
+            strength = min(m_pos[r_pos], m_vel[r_vel])
+            if strength > 0:
+                center = self.sets_out[r_out]
+                numerator += strength * center
+                denominator += strength
+                
+        if denominator == 0:
+            return 0.0
+        return numerator / denominator
 
 def run_controlled_simulation(level, ball):
-    pid = PIDController(kp=5, ki=0, kd=0.5, setpoint=-0.11)
+    fuzzy = FuzzyController()
     
     hist = {'x': [], 'y': [], 'angle': [], 'target': []}
-    steps = 1000
+    steps = 2000
     dt = 0.01
     current_angle = 0.0
     
-    print("Simulando...")
+    print("Simulating...")
     for s in range(steps):
         target_angle = 0.0
         
         if ball.state == "ROLLING":
-            control_output = pid.compute(ball.lx, ball.lv, dt)
-            target_angle = -control_output
+            control_output = fuzzy.compute(ball.lx, ball.lv)
+            target_angle = -control_output 
             
             max_ang = np.radians(45)
             target_angle = np.clip(target_angle, -max_ang, max_ang)
         else:
             target_angle = 0.0
-            pid.reset()
 
         angle_diff = target_angle - current_angle
         omega = angle_diff / dt 
         
-        max_omega = 10.0 
+        max_omega = 8.0 
         omega = np.clip(omega, -max_omega, max_omega)
         
         new_angle = current_angle + omega * dt
@@ -207,7 +264,7 @@ def run_controlled_simulation(level, ball):
         hist['target'].append((tx, ty))
         
         if gy < -1.5:
-            print("La bola se cayó del sistema.")
+            print("Ball reached bottom.")
             break
 
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -215,7 +272,7 @@ def run_controlled_simulation(level, ball):
     ax.set_ylim(-0.5, 0.5)
     ax.set_aspect('equal')
     ax.grid(True, alpha=0.3)
-    ax.set_title("Control PID")
+    ax.set_title("Fuzzy Controller")
 
     lines = [ax.plot([], [], 'k-', lw=1.5)[0] for _ in level.visuals]
     dot, = ax.plot([], [], 'ro', markersize=8, zorder=10)
@@ -236,7 +293,7 @@ def run_controlled_simulation(level, ball):
         
         return lines + [dot, trace, target_mark]
 
-    ani = FuncAnimation(fig, anim, frames=len(hist['x']), interval=20, blit=True)
+    ani = FuncAnimation(fig, anim, frames=len(hist['x']), interval=10, blit=True)
     plt.show()
 
 if __name__ == "__main__":
