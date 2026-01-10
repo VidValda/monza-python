@@ -148,8 +148,11 @@ class PhysicsBall:
 
 class FuzzyController:
     def __init__(self):
+        # Ordered keys for visualization purposes
+        self.labels = ['NB', 'NS', 'Z', 'PS', 'PB']
+        
         self.sets_pos = {
-            'NB': -0.3, 'NS': -0.1, 'Z': 0.0, 'PS': 0.1, 'PB': 0.3
+            'NB': -0.3, 'NS': -0.2, 'Z': 0.0, 'PS': 0.2, 'PB': 0.3
         }
         self.sets_vel = {
             'NB': -0.5, 'NS': -0.25, 'Z': 0.0, 'PS': 0.25, 'PB': 0.5
@@ -158,76 +161,105 @@ class FuzzyController:
             'NB': -0.5, 'NS': -0.25, 'Z': 0.0, 'PS': 0.25, 'PB': 0.5
         }
         
+        # Rule Base stored as a list of tuples
         self.rules = [
-            ('NB', 'NB', 'PB'),
-            ('NB', 'NS', 'PB'),
-            ('NB', 'Z',  'PB'),
-            ('NB', 'PS', 'PB'), 
-            ('NB', 'PB', 'PS'), 
-
-            ('NS', 'NB', 'PB'),
-            ('NS', 'NS', 'PB'),
-            ('NS', 'Z',  'PS'),
-            ('NS', 'PS', 'PS'),
-            ('NS', 'PB', 'Z'),
-
-            ('Z',  'NB', 'PB'),
-            ('Z',  'NS', 'PS'),
-            ('Z',  'Z',  'NB'),
-            ('Z',  'PS', 'NS'),
-            ('Z',  'PB', 'NB'),
-
-            ('PS', 'NB', 'Z'),
-            ('PS', 'NS', 'NS'),
-            ('PS', 'Z',  'NS'),
-            ('PS', 'PS', 'NB'),
-            ('PS', 'PB', 'NB'),
-
-            ('PB', 'NB', 'NS'),
-            ('PB', 'NS', 'NB'),
-            ('PB', 'Z',  'NB'),
-            ('PB', 'PS', 'NB'),
-            ('PB', 'PB', 'NB'),
+            ('NB', 'NB', 'PB'), ('NB', 'NS', 'PB'), ('NB', 'Z',  'PB'), ('NB', 'PS', 'PB'), ('NB', 'PB', 'PS'), 
+            ('NS', 'NB', 'PB'), ('NS', 'NS', 'PB'), ('NS', 'Z',  'PS'), ('NS', 'PS', 'PS'), ('NS', 'PB', 'Z'),
+            ('Z',  'NB', 'PB'), ('Z',  'NS', 'PS'), ('Z',  'Z',  'NB'), ('Z',  'PS', 'NS'), ('Z',  'PB', 'NB'),
+            ('PS', 'NB', 'Z'),  ('PS', 'NS', 'NS'), ('PS', 'Z',  'NS'), ('PS', 'PS', 'NB'), ('PS', 'PB', 'NB'),
+            ('PB', 'NB', 'NS'), ('PB', 'NS', 'NB'), ('PB', 'Z',  'NB'), ('PB', 'PS', 'NB'), ('PB', 'PB', 'NB'),
         ]
 
     def _trimf(self, x, abc):
         a, b, c = abc
+        # Triangular membership function
         return max(min((x - a) / (b - a + 1e-9), (c - x) / (c - b + 1e-9)), 0)
 
     def _get_memberships(self, val, sets):
         mems = {}
-        keys = list(sets.keys())
-        vals = list(sets.values())
+        keys = self.labels
+        vals = [sets[k] for k in keys]
         
         for i, k in enumerate(keys):
             center = vals[i]
+            # Determine neighbors for triangle width
             left = vals[i-1] if i > 0 else center - (vals[i+1]-center)
             right = vals[i+1] if i < len(vals)-1 else center + (center-vals[i-1])
             mems[k] = self._trimf(val, [left, center, right])
         return mems
 
     def compute(self, pos, vel):
+        # Step 1: Fuzzification
         m_pos = self._get_memberships(pos, self.sets_pos)
         m_vel = self._get_memberships(vel, self.sets_vel)
         
         numerator = 0.0
         denominator = 0.0
         
+        # Data for visualization
+        active_rules = [] # Stores ((pos_idx, vel_idx), strength, out_val)
+        
+        # Step 2: Rule Evaluation
         for r_pos, r_vel, r_out in self.rules:
+            # Min operator (AND)
             strength = min(m_pos[r_pos], m_vel[r_vel])
+            
             if strength > 0:
                 center = self.sets_out[r_out]
                 numerator += strength * center
                 denominator += strength
                 
+                # Store info for heatmap (indices for plotting)
+                p_idx = self.labels.index(r_pos)
+                v_idx = self.labels.index(r_vel)
+                active_rules.append({'indices': (v_idx, p_idx), 'str': strength, 'out': center})
+                
+        # Step 3: Defuzzification (Center of Gravity / Weighted Average)
         if denominator == 0:
-            return 0.0
-        return numerator / denominator
+            out = 0.0
+        else:
+            out = numerator / denominator
+            
+        debug_info = {
+            'm_pos': m_pos,
+            'm_vel': m_vel,
+            'rules': active_rules,
+            'output': out
+        }
+        return out, debug_info
 
 def run_controlled_simulation(level, ball):
     fuzzy = FuzzyController()
     
-    hist = {'x': [], 'y': [], 'angle': [], 'target': []}
+    # Pre-calculate static triangles for visualization background
+    x_static = np.linspace(-1, 1, 100)
+    static_plots = {'pos': [], 'vel': []}
+    for k in fuzzy.labels:
+        # Generate y-values for Position MF triangles
+        vals = [fuzzy.sets_pos[x] for x in fuzzy.labels]
+        i = fuzzy.labels.index(k)
+        c = vals[i]
+        l = vals[i-1] if i > 0 else c - (vals[i+1]-c)
+        r = vals[i+1] if i < len(vals)-1 else c + (c-vals[i-1])
+        y = [fuzzy._trimf(xi, [l, c, r]) for xi in x_static]
+        static_plots['pos'].append((x_static, y, k))
+        
+        # Generate y-values for Velocity MF triangles
+        vals = [fuzzy.sets_vel[x] for x in fuzzy.labels]
+        i = fuzzy.labels.index(k)
+        c = vals[i]
+        l = vals[i-1] if i > 0 else c - (vals[i+1]-c)
+        r = vals[i+1] if i < len(vals)-1 else c + (c-vals[i-1])
+        y = [fuzzy._trimf(xi, [l, c, r]) for xi in x_static]
+        static_plots['vel'].append((x_static, y, k))
+
+    # History storage
+    hist = {
+        'x': [], 'y': [], 'angle': [], 
+        'lx': [], 'lv': [], 'debug': [],
+        'state': [] # 1 for rolling, 0 for falling
+    }
+    
     steps = 2000
     dt = 0.01
     current_angle = 0.0
@@ -235,22 +267,19 @@ def run_controlled_simulation(level, ball):
     print("Simulating...")
     for s in range(steps):
         target_angle = 0.0
+        debug_data = None
         
         if ball.state == "ROLLING":
-            control_output = fuzzy.compute(ball.lx, ball.lv)
+            control_output, debug_data = fuzzy.compute(ball.lx, ball.lv)
             target_angle = -control_output 
-            
-            max_ang = np.radians(45)
-            target_angle = np.clip(target_angle, -max_ang, max_ang)
+            target_angle = np.clip(target_angle, -np.radians(45), np.radians(45))
         else:
             target_angle = 0.0
+            # Empty debug data if falling
+            debug_data = {'m_pos':{k:0 for k in fuzzy.labels}, 'm_vel':{k:0 for k in fuzzy.labels}, 'rules':[], 'output':0}
 
         angle_diff = target_angle - current_angle
-        omega = angle_diff / dt 
-        
-        max_omega = 8.0 
-        omega = np.clip(omega, -max_omega, max_omega)
-        
+        omega = np.clip(angle_diff / dt, -8.0, 8.0)
         new_angle = current_angle + omega * dt
         
         gx, gy = ball.update(new_angle, omega)
@@ -259,41 +288,131 @@ def run_controlled_simulation(level, ball):
         hist['x'].append(gx)
         hist['y'].append(gy)
         hist['angle'].append(current_angle)
+        hist['lx'].append(ball.lx)
+        hist['lv'].append(ball.lv)
+        hist['state'].append(ball.state == "ROLLING")
+        hist['debug'].append(debug_data)
         
-        tx, ty = ball._to_global(0, ball.ly if ball.state=="ROLLING" else 0, current_angle)
-        hist['target'].append((tx, ty))
-        
-        if gy < -1.5:
-            print("Ball reached bottom.")
-            break
 
-    fig, ax = plt.subplots(figsize=(8, 8))
-    ax.set_xlim(-0.5, 0.5)
-    ax.set_ylim(-0.5, 0.5)
-    ax.set_aspect('equal')
-    ax.grid(True, alpha=0.3)
-    ax.set_title("Fuzzy Controller")
+    # --- Dashboard Setup ---
+    fig = plt.figure(figsize=(14, 9))
+    gs = fig.add_gridspec(3, 3)
 
-    lines = [ax.plot([], [], 'k-', lw=1.5)[0] for _ in level.visuals]
-    dot, = ax.plot([], [], 'ro', markersize=8, zorder=10)
-    target_mark, = ax.plot([], [], 'g+', markersize=10, markeredgewidth=2)
-    trace, = ax.plot([], [], 'r-', lw=0.5, alpha=0.5)
+    # 1. Main Track View (Top Left & Center)
+    ax_track = fig.add_subplot(gs[0:2, 0:2])
+    ax_track.set_title("Simulation")
+    ax_track.set_xlim(-0.5, 0.5); ax_track.set_ylim(-0.5, 0.5); ax_track.set_aspect('equal')
+    ax_track.grid(True, alpha=0.3)
+    track_lines = [ax_track.plot([], [], 'k-', lw=1.5)[0] for _ in level.visuals]
+    dot, = ax_track.plot([], [], 'ro', markersize=8, zorder=10)
+    trace, = ax_track.plot([], [], 'r-', lw=0.5, alpha=0.5)
 
-    def anim(f):
-        a = hist['angle'][f]
-        for ln, (lx, ly) in zip(lines, level.visuals):
-            gx, gy = ball._to_global(lx, ly, a)
+    # 2. Rule Heatmap (Top Right)
+    ax_rules = fig.add_subplot(gs[0, 2])
+    ax_rules.set_title("Active Rules Matrix")
+    ax_rules.set_xticks(range(5)); ax_rules.set_xticklabels(fuzzy.labels)
+    ax_rules.set_xlabel("Pos Error")
+    ax_rules.set_yticks(range(5)); ax_rules.set_yticklabels(fuzzy.labels)
+    ax_rules.set_ylabel("Velocity")
+    # Initialize heatmap image (5x5 grid)
+    rule_grid = np.zeros((5, 5)) 
+    heatmap = ax_rules.imshow(rule_grid, cmap='Reds', vmin=0, vmax=1, origin='lower')
+
+    # 3. Defuzzification View (Middle Right)
+    ax_out = fig.add_subplot(gs[1, 2])
+    ax_out.set_title("Defuzzification (Output)")
+    ax_out.set_xlim(-0.6, 0.6); ax_out.set_ylim(0, 1.1)
+    ax_out.grid(True, alpha=0.3)
+    # Draw Singleton locations
+    for k, v in fuzzy.sets_out.items():
+        ax_out.axvline(v, color='gray', linestyle=':', alpha=0.5)
+        ax_out.text(v, 1.02, k, ha='center', fontsize=8)
+    # Dynamic bars for rule output strengths
+    out_bars = ax_out.bar([v for v in fuzzy.sets_out.values()], [0]*5, width=0.05, color='blue', alpha=0.6)
+    out_line = ax_out.axvline(0, color='red', lw=2, label='Result')
+    
+    # 4. Fuzzification Position (Bottom Left)
+    ax_fuz_p = fig.add_subplot(gs[2, 0])
+    ax_fuz_p.set_title("Fuzzification: Pos Error (lx)")
+    ax_fuz_p.set_ylim(0, 1.1); ax_fuz_p.set_xlim(-0.4, 0.4)
+    for x, y, k in static_plots['pos']:
+        ax_fuz_p.plot(x, y, 'k-', lw=0.5, alpha=0.5)
+        ax_fuz_p.fill_between(x, 0, y, alpha=0.05, color='blue')
+        ax_fuz_p.text(fuzzy.sets_pos[k], 1.05, k, ha='center', fontsize=8)
+    line_p_curr = ax_fuz_p.axvline(0, color='red', lw=1.5)
+    dots_p, = ax_fuz_p.plot([], [], 'bo') # Intersection points
+
+    # 5. Fuzzification Velocity (Bottom Center)
+    ax_fuz_v = fig.add_subplot(gs[2, 1])
+    ax_fuz_v.set_title("Fuzzification: Velocity (lv)")
+    ax_fuz_v.set_ylim(0, 1.1); ax_fuz_v.set_xlim(-0.6, 0.6)
+    for x, y, k in static_plots['vel']:
+        ax_fuz_v.plot(x, y, 'k-', lw=0.5, alpha=0.5)
+        ax_fuz_v.fill_between(x, 0, y, alpha=0.05, color='green')
+        ax_fuz_v.text(fuzzy.sets_vel[k], 1.05, k, ha='center', fontsize=8)
+    line_v_curr = ax_fuz_v.axvline(0, color='red', lw=1.5)
+    dots_v, = ax_fuz_v.plot([], [], 'go') # Intersection points
+
+    plt.tight_layout()
+
+    def update(f):
+        # -- Update Track --
+        ang = hist['angle'][f]
+        for ln, (lx, ly) in zip(track_lines, level.visuals):
+            gx, gy = ball._to_global(lx, ly, ang)
             ln.set_data(gx, gy)
-        
-        dot.set_data([hist['x'][f]], [hist['y'][f]])        
+        dot.set_data([hist['x'][f]], [hist['y'][f]])
         trace.set_data(hist['x'][max(0, f-50):f], hist['y'][max(0, f-50):f])
-        
-        tx, ty = hist['target'][f]
-        target_mark.set_data([tx], [ty])
-        
-        return lines + [dot, trace, target_mark]
 
-    ani = FuncAnimation(fig, anim, frames=len(hist['x']), interval=10, blit=True)
+        # -- Get Debug Data --
+        info = hist['debug'][f]
+        lx_val = hist['lx'][f]
+        lv_val = hist['lv'][f]
+
+        # -- Update Fuzzification Plots --
+        line_p_curr.set_xdata([lx_val])
+        line_v_curr.set_xdata([lv_val])
+        
+        # Calculate intersection y-values for dots
+        p_dots_y = [info['m_pos'][k] for k in fuzzy.labels]
+        p_dots_x = [fuzzy.sets_pos[k] for k in fuzzy.labels] # visual approximation (peaks)
+        # Actually we want the dots on the red line, so x is always lx_val
+        # But y is the membership value
+        dots_p.set_data([lx_val]*5, p_dots_y)
+        dots_v.set_data([lv_val]*5, [info['m_vel'][k] for k in fuzzy.labels])
+
+        # -- Update Rule Heatmap --
+        grid_data = np.zeros((5, 5))
+        for r in info['rules']:
+            # r['indices'] is (vel_idx, pos_idx) -> (row, col)
+            row, col = r['indices']
+            grid_data[row, col] = r['str']
+        heatmap.set_data(grid_data)
+
+        # -- Update Defuzzification --
+        # Reset bars
+        bar_heights = [0] * 5
+        # Sum up strengths for each output singleton (max or sum depending on aggregation, here we visualize contribution)
+        for r in info['rules']:
+            # Find which singleton this rule maps to
+            # We can find the index by matching the output value 'r['out']' to fuzzy.sets_out values
+            out_val = r['out']
+            # Find index in sets_out.values()
+            vals = list(fuzzy.sets_out.values())
+            try:
+                idx = vals.index(out_val)
+                # Accumulate for visualization (shows total pressure on that singleton)
+                bar_heights[idx] = max(bar_heights[idx], r['str'])
+            except ValueError: pass
+            
+        for bar, h in zip(out_bars, bar_heights):
+            bar.set_height(h)
+            
+        out_line.set_xdata([info['output']])
+
+        return track_lines + [dot, trace, line_p_curr, line_v_curr, dots_p, dots_v, heatmap, out_line] + list(out_bars)
+
+    ani = FuncAnimation(fig, update, frames=len(hist['x']), interval=20, blit=False) # blit=False for Heatmap stability
     plt.show()
 
 if __name__ == "__main__":
