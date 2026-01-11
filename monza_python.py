@@ -222,9 +222,9 @@ class FuzzyController:
         # Membership Centers - expanded ranges for error control
         # Error = setpoint - position: positive error means position is left of setpoint
         self.sets_pos = {'NB': -0.5, 'NS': -0.25, 'Z': 0.0, 'PS': 0.25, 'PB': 0.5}
-        self.sets_vel = {'NB': -0.5, 'NS': -0.25, 'Z': 0.0, 'PS': 0.25, 'PB': 0.5}
+        self.sets_vel = {'NB': -1.0, 'NS': -0.75, 'Z': 0.0, 'PS': 0.75, 'PB': 1.0}
         # Output range matches max tilt (45 degrees = 0.785 radians)
-        self.sets_out = {'NB': -0.785, 'NS': -0.4, 'Z': 0.0, 'PS': 0.4, 'PB': 0.785}
+        self.sets_out = {'NB': -1, 'NS': -0.75, 'Z': 0.0, 'PS': 0.75, 'PB': 1}
         
         # Rule Base: (Error, Velocity, Output)
         # For error control: positive error (position left of setpoint) needs positive output (tilt right)
