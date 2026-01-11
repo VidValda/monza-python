@@ -23,7 +23,8 @@ class SimulationConfig:
     duration_steps: int = 2000
     max_tilt: float = 45.0    # Degrees
     max_omega: float = 8.0    # Rad/s
-    setpoint: float = 0.0      # Target position for fuzzy controller
+    setpoint: float = 0.0      # Target position for fuzzy controller (deprecated, using controller function)
+    nivel: int = 1             # Current level (1-4, MATLAB 1-based)
 
 # --- Helper Functions ---
 def rotate_vector(x: float, y: float, angle: float) -> Tuple[float, float]:
@@ -247,72 +248,190 @@ class PhysicsBall:
 
 
 class FuzzyController:
+    """
+    Fuzzy controller implementation based on MATLAB fuzzy logic system.
+    Input 1: error (9 membership functions)
+    Input 2: velocidad (5 membership functions)
+    Output: inclinacion (9 membership functions)
+    """
     def __init__(self):
-        self.labels = ['NB', 'NS', 'Z', 'PS', 'PB']
+        # Input 1: error - 9 membership functions
+        self.error_labels = ['grandeNeg', 'medioNeg', 'pequeñoNeg', 'muyPequeñoNeg', 'cero',
+                             'muyPequeñoPos', 'pequeñoPos', 'medioPos', 'grandePos']
+        self.error_range = [-0.23, 0.23]
+        self.error_mfs = {
+            'grandeNeg': [-0.278, -0.23, -0.182],
+            'medioNeg': [-0.22, -0.173, -0.125],
+            'pequeñoNeg': [-0.163, -0.115, -0.06],
+            'muyPequeñoNeg': [-0.08, -0.04, -0.005],
+            'cero': [-0.005, 0, 0.005],
+            'muyPequeñoPos': [0.005, 0.04, 0.08],
+            'pequeñoPos': [0.06, 0.115, 0.163],
+            'medioPos': [0.125, 0.173, 0.22],
+            'grandePos': [0.182, 0.23, 0.278]
+        }
         
-        # Membership Centers - expanded ranges for error control
-        # Error = setpoint - position: positive error means position is left of setpoint
-        self.sets_pos = {'NB': -0.5, 'NS': -0.25, 'Z': 0.0, 'PS': 0.25, 'PB': 0.5}
-        self.sets_vel = {'NB': -1.0, 'NS': -0.75, 'Z': 0.0, 'PS': 0.75, 'PB': 1.0}
-        # Output range matches max tilt (45 degrees = 0.785 radians)
-        self.sets_out = {'NB': -1, 'NS': -0.75, 'Z': 0.0, 'PS': 0.75, 'PB': 1}
+        # Input 2: velocidad - 5 membership functions
+        self.velocidad_labels = ['rapidaNeg', 'lentaNeg', 'cero', 'lentaPos', 'rapidaPos']
+        self.velocidad_range = [-0.5, 0.5]
+        self.velocidad_mfs = {
+            'rapidaNeg': [-0.708333333333333, -0.5, -0.291666666666667],
+            'lentaNeg': [-0.458333333333333, -0.25, -0.0416666666666667],
+            'cero': [-0.208333333333333, 0, 0.208333333333333],
+            'lentaPos': [0.0416666666666667, 0.25, 0.458333333333333],
+            'rapidaPos': [0.291666666666667, 0.5, 0.708333333333333]
+        }
         
-        # Rule Base: (Error, Velocity, Output)
-        # For error control: positive error (position left of setpoint) needs positive output (tilt right)
-        # Negative error (position right of setpoint) needs negative output (tilt left)
-        # This is INVERTED from position control (error = setpoint - position)
-        self.rules_def = [
-            ('NB', 'NB', 'NB'), ('NB', 'NS', 'NB'), ('NB', 'Z',  'NB'), ('NB', 'PS', 'NB'), ('NB', 'PB', 'NS'), 
-            ('NS', 'NB', 'NB'), ('NS', 'NS', 'NB'), ('NS', 'Z',  'NS'), ('NS', 'PS', 'NS'), ('NS', 'PB', 'Z'),
-            ('Z',  'NB', 'NS'), ('Z',  'NS', 'NS'), ('Z',  'Z',  'Z'), ('Z',  'PS', 'PS'), ('Z',  'PB', 'PS'),
-            ('PS', 'NB', 'Z'), ('PS', 'NS', 'PS'), ('PS', 'Z',  'PS'), ('PS', 'PS', 'PB'), ('PS', 'PB', 'PB'),
-            ('PB', 'NB', 'PS'), ('PB', 'NS', 'PB'), ('PB', 'Z',  'PB'), ('PB', 'PS', 'PB'), ('PB', 'PB', 'PB'),
+        # Output: inclinacion - 9 membership functions
+        self.inclinacion_labels = ['giraMuchoNeg', 'giraMedioNeg', 'giraPocoNeg', 'giraMuyPocoNeg', 'cero',
+                                   'giraMuyPocoPos', 'giraPocoPos', 'giraMedioPos', 'giraMuchoPos']
+        self.inclinacion_range = [-0.4, 0.4]
+        self.inclinacion_mfs = {
+            'giraMuchoNeg': [-0.483333333333333, -0.4, -0.316666666666667],
+            'giraMedioNeg': [-0.383333333333333, -0.3, -0.216666666666667],
+            'giraPocoNeg': [-0.283333333333333, -0.2, -0.116666666666667],
+            'giraMuyPocoNeg': [-0.183333333333333, -0.1, -0.0166666666666667],
+            'cero': [-0.0833333333333334, -2.77555756156289e-17, 0.0833333333333333],
+            'giraMuyPocoPos': [0.0166666666666666, 0.1, 0.183333333333333],
+            'giraPocoPos': [0.116666666666667, 0.2, 0.283333333333333],
+            'giraMedioPos': [0.216666666666667, 0.3, 0.383333333333333],
+            'giraMuchoPos': [0.316666666666667, 0.4, 0.483333333333333]
+        }
+        
+        # Rules: format is (error_mf_idx, velocidad_mf_idx, inclinacion_mf_idx)
+        # MATLAB uses 1-based indexing, we convert to 0-based
+        # Rule format: "1 3, 1 (1) : 1" means error=MF1, velocidad=MF3, output=MF1
+        self.rules = [
+            (0, 2, 0),   # 1 3, 1 (1) : 1 -> error=grandeNeg, velocidad=cero, output=giraMuchoNeg
+            (1, 2, 1),   # 2 3, 2 (1) : 1 -> error=medioNeg, velocidad=cero, output=giraMedioNeg
+            (2, 2, 2),   # 3 3, 3 (1) : 1 -> error=pequeñoNeg, velocidad=cero, output=giraPocoNeg
+            (3, 2, 3),   # 4 3, 4 (1) : 1 -> error=muyPequeñoNeg, velocidad=cero, output=giraMuyPocoNeg
+            (5, 2, 5),   # 6 3, 6 (1) : 1 -> error=muyPequeñoPos, velocidad=cero, output=giraMuyPocoPos
+            (6, 2, 6),   # 7 3, 7 (1) : 1 -> error=pequeñoPos, velocidad=cero, output=giraPocoPos
+            (7, 2, 7),   # 8 3, 8 (1) : 1 -> error=medioPos, velocidad=cero, output=giraMedioPos
+            (8, 2, 8),   # 9 3, 9 (1) : 1 -> error=grandePos, velocidad=cero, output=giraMuchoPos
+            (0, 1, 0),   # 1 2, 1 (1) : 1 -> error=grandeNeg, velocidad=lentaNeg, output=giraMuchoNeg
+            (1, 1, 1),   # 2 2, 2 (1) : 1 -> error=medioNeg, velocidad=lentaNeg, output=giraMedioNeg
+            (2, 1, 2),   # 3 2, 3 (1) : 1 -> error=pequeñoNeg, velocidad=lentaNeg, output=giraPocoNeg
+            (6, 3, 6),   # 7 4, 7 (1) : 1 -> error=pequeñoPos, velocidad=lentaPos, output=giraPocoPos
+            (7, 3, 7),   # 8 4, 8 (1) : 1 -> error=medioPos, velocidad=lentaPos, output=giraMedioPos
+            (8, 3, 8),   # 9 4, 9 (1) : 1 -> error=grandePos, velocidad=lentaPos, output=giraMuchoPos
+            (3, 0, 3),   # 4 1, 4 (1) : 1 -> error=muyPequeñoNeg, velocidad=rapidaNeg, output=giraMuyPocoNeg
+            (5, 4, 5),   # 6 5, 6 (1) : 1 -> error=muyPequeñoPos, velocidad=rapidaPos, output=giraMuyPocoPos
+            (2, 0, 2),   # 3 1, 3 (1) : 1 -> error=pequeñoNeg, velocidad=rapidaNeg, output=giraPocoNeg
+            (6, 4, 6),   # 7 5, 7 (1) : 1 -> error=pequeñoPos, velocidad=rapidaPos, output=giraPocoPos
+            (4, 4, 3),   # 5 5, 4 (1) : 1 -> error=cero, velocidad=rapidaPos, output=giraMuyPocoNeg
+            (4, 0, 5),   # 5 1, 6 (1) : 1 -> error=cero, velocidad=rapidaNeg, output=giraMuyPocoPos
         ]
 
     def _trimf(self, x, abc):
-        """Triangular membership function generator."""
+        """Triangular membership function."""
         a, b, c = abc
-        return max(min((x - a) / (b - a + 1e-9), (c - x) / (c - b + 1e-9)), 0)
+        if x <= a or x >= c:
+            return 0.0
+        if x < b:
+            return (x - a) / (b - a + 1e-9)
+        else:
+            return (c - x) / (c - b + 1e-9)
 
-    def _get_memberships(self, val, sets):
-        """Calculates membership degree for all sets."""
-        mems = {}
-        vals = [sets[k] for k in self.labels]
-        
-        for i, k in enumerate(self.labels):
-            center = vals[i]
-            left = vals[i-1] if i > 0 else center - (vals[i+1]-center)
-            right = vals[i+1] if i < len(vals)-1 else center + (center-vals[i-1])
-            mems[k] = self._trimf(val, [left, center, right])
-        return mems
+    def _fuzzify_error(self, error_val):
+        """Fuzzify error input."""
+        memberships = {}
+        for label in self.error_labels:
+            memberships[label] = self._trimf(error_val, self.error_mfs[label])
+        return memberships
 
-    def compute(self, pos, vel):
-        # 1. Fuzzification
-        m_pos = self._get_memberships(pos, self.sets_pos)
-        m_vel = self._get_memberships(vel, self.sets_vel)
+    def _fuzzify_velocidad(self, velocidad_val):
+        """Fuzzify velocidad input."""
+        memberships = {}
+        for label in self.velocidad_labels:
+            memberships[label] = self._trimf(velocidad_val, self.velocidad_mfs[label])
+        return memberships
+
+    def _centroid_defuzzify(self, aggregated_output):
+        """
+        Centroid defuzzification method.
+        aggregated_output: dict mapping output labels to their aggregated membership values
+        """
+        numerator = 0.0
+        denominator = 0.0
         
-        numerator, denominator = 0.0, 0.0
-        active_rules = [] 
+        # Use fine resolution for centroid calculation
+        output_range = np.linspace(self.inclinacion_range[0], self.inclinacion_range[1], 1000)
         
-        # 2. Rule Evaluation
-        for r_pos, r_vel, r_out in self.rules_def:
-            strength = min(m_pos[r_pos], m_vel[r_vel])
+        for x in output_range:
+            # Calculate membership value at x for each output MF
+            mu_x = 0.0
+            for label in self.inclinacion_labels:
+                mu_mf = self._trimf(x, self.inclinacion_mfs[label])
+                # Aggregate using max (as per AggMethod='max')
+                mu_x = max(mu_x, min(mu_mf, aggregated_output.get(label, 0.0)))
             
-            if strength > 0:
-                center = self.sets_out[r_out]
-                numerator += strength * center
-                denominator += strength
+            numerator += x * mu_x
+            denominator += mu_x
+        
+        if denominator == 0:
+            return 0.0
+        return numerator / denominator
+
+    def compute(self, error, velocidad):
+        """
+        Compute fuzzy controller output.
+        Args:
+            error: error value (position error)
+            velocidad: velocity value
+        Returns:
+            output: defuzzified output (inclinacion)
+            debug: debug information dictionary
+        """
+        # Clamp inputs to ranges
+        error = np.clip(error, self.error_range[0], self.error_range[1])
+        velocidad = np.clip(velocidad, self.velocidad_range[0], self.velocidad_range[1])
+        
+        # 1. Fuzzification
+        m_error = self._fuzzify_error(error)
+        m_velocidad = self._fuzzify_velocidad(velocidad)
+        
+        # 2. Rule evaluation and aggregation
+        # Initialize aggregated output (using max aggregation)
+        aggregated_output = {label: 0.0 for label in self.inclinacion_labels}
+        active_rules = []
+        
+        for error_mf_idx, velocidad_mf_idx, inclinacion_mf_idx in self.rules:
+            # Get membership values
+            error_label = self.error_labels[error_mf_idx]
+            velocidad_label = self.velocidad_labels[velocidad_mf_idx]
+            inclinacion_label = self.inclinacion_labels[inclinacion_mf_idx]
+            
+            # AND method: min
+            rule_strength = min(m_error[error_label], m_velocidad[velocidad_label])
+            
+            if rule_strength > 0:
+                # Implication method: min (clip output MF by rule strength)
+                # Aggregation method: max (take maximum of all rule outputs)
+                aggregated_output[inclinacion_label] = max(
+                    aggregated_output[inclinacion_label],
+                    rule_strength  # min implication
+                )
                 
                 # Debug info
-                p_idx = self.labels.index(r_pos)
-                v_idx = self.labels.index(r_vel)
-                active_rules.append({'indices': (v_idx, p_idx), 'str': strength, 'out': center})
-                
-        # 3. Defuzzification (Weighted Average)
-        output = numerator / denominator if denominator != 0 else 0.0
-            
+                active_rules.append({
+                    'error_mf': error_label,
+                    'velocidad_mf': velocidad_label,
+                    'inclinacion_mf': inclinacion_label,
+                    'strength': rule_strength,
+                    'indices': (velocidad_mf_idx, error_mf_idx)
+                })
+        
+        # 3. Defuzzification: centroid
+        output = self._centroid_defuzzify(aggregated_output)
+        
         return output, {
-            'm_pos': m_pos, 'm_vel': m_vel, 'rules': active_rules, 'output': output
+            'm_error': m_error,
+            'm_velocidad': m_velocidad,
+            'rules': active_rules,
+            'output': output,
+            'aggregated_output': aggregated_output
         }
         
 class Dashboard:
@@ -344,41 +463,42 @@ class Dashboard:
     def _setup_heatmap(self):
         ax = self.fig.add_subplot(self.gs[0, 2])
         ax.set_title("Active Rules Matrix")
-        ax.set_xlabel("Pos Error"); ax.set_ylabel("Velocity")
-        ax.set_xticks(range(5)); ax.set_xticklabels(self.fuzzy.labels)
-        ax.set_yticks(range(5)); ax.set_yticklabels(self.fuzzy.labels)
-        self.heatmap_img = ax.imshow(np.zeros((5, 5)), cmap='Reds', vmin=0, vmax=1, origin='lower')
+        ax.set_xlabel("Error"); ax.set_ylabel("Velocidad")
+        # Error has 9 MFs, Velocidad has 5 MFs
+        ax.set_xticks(range(9)); ax.set_xticklabels([l[:4] for l in self.fuzzy.error_labels], rotation=45, fontsize=7)
+        ax.set_yticks(range(5)); ax.set_yticklabels([l[:4] for l in self.fuzzy.velocidad_labels], fontsize=7)
+        self.heatmap_img = ax.imshow(np.zeros((5, 9)), cmap='Reds', vmin=0, vmax=1, origin='lower', aspect='auto')
 
     def _setup_defuzz_view(self):
         ax = self.fig.add_subplot(self.gs[1, 2])
         ax.set_title("Defuzzification")
-        ax.set_xlim(-0.6, 0.6); ax.set_ylim(0, 1.1)
+        ax.set_xlim(-0.5, 0.5); ax.set_ylim(0, 1.1)
         ax.grid(True, alpha=0.3)
-        for k, v in self.fuzzy.sets_out.items():
-            ax.axvline(v, color='gray', linestyle=':', alpha=0.5)
-            ax.text(v, 1.02, k, ha='center', fontsize=8)
-        self.out_bars = ax.bar(list(self.fuzzy.sets_out.values()), [0]*5, width=0.05, color='blue', alpha=0.6)
+        # Get centers of output MFs
+        output_centers = [self.fuzzy.inclinacion_mfs[label][1] for label in self.fuzzy.inclinacion_labels]
+        for i, (label, center) in enumerate(zip(self.fuzzy.inclinacion_labels, output_centers)):
+            ax.axvline(center, color='gray', linestyle=':', alpha=0.5)
+            ax.text(center, 1.02, label[:4], ha='center', fontsize=6, rotation=45)
+        self.out_bars = ax.bar(output_centers, [0]*9, width=0.02, color='blue', alpha=0.6)
         self.out_line = ax.axvline(0, color='red', lw=2)
+        self.output_centers = output_centers
 
-    def _setup_fuzz_plot(self, gs_pos, title, set_dict, color):
+    def _setup_fuzz_plot(self, gs_pos, title, mf_dict, mf_labels, mf_range, color):
         ax = self.fig.add_subplot(gs_pos)
         ax.set_title(title)
         ax.set_ylim(0, 1.1)
+        ax.set_xlim(mf_range[0] * 1.2, mf_range[1] * 1.2)
         
         # Draw static MF triangles
-        x_static = np.linspace(-1, 1, 100)
-        for k in self.fuzzy.labels:
-            vals = [set_dict[x] for x in self.fuzzy.labels]
-            i = self.fuzzy.labels.index(k)
-            c = vals[i]
-            l = vals[i-1] if i > 0 else c - (vals[i+1]-c)
-            r = vals[i+1] if i < len(vals)-1 else c + (c-vals[i-1])
-            y = [self.fuzzy._trimf(xi, [l, c, r]) for xi in x_static]
+        x_static = np.linspace(mf_range[0] * 1.2, mf_range[1] * 1.2, 200)
+        for label in mf_labels:
+            abc = mf_dict[label]
+            y = [self.fuzzy._trimf(xi, abc) for xi in x_static]
             ax.plot(x_static, y, 'k-', lw=0.5, alpha=0.5)
             ax.fill_between(x_static, 0, y, alpha=0.05, color=color)
         
         line = ax.axvline(0, color='red', lw=1.5)
-        dots, = ax.plot([], [], f'{color[0]}o')
+        dots, = ax.plot([], [], f'{color[0]}o', markersize=4)
         return line, dots
 
     def _setup_setpoint_plot(self):
@@ -396,10 +516,18 @@ class Dashboard:
         # Initial y-limits will be set dynamically in update_frame
 
     def _setup_fuzz_pos(self):
-        self.line_p, self.dots_p = self._setup_fuzz_plot(self.gs[3, 0], "Fuzz: Error (setpoint - pos)", self.fuzzy.sets_pos, 'blue')
+        self.line_p, self.dots_p = self._setup_fuzz_plot(
+            self.gs[3, 0], "Fuzz: Error", 
+            self.fuzzy.error_mfs, self.fuzzy.error_labels, 
+            self.fuzzy.error_range, 'blue'
+        )
 
     def _setup_fuzz_vel(self):
-        self.line_v, self.dots_v = self._setup_fuzz_plot(self.gs[3, 1], "Fuzz: Vel (lv)", self.fuzzy.sets_vel, 'green')
+        self.line_v, self.dots_v = self._setup_fuzz_plot(
+            self.gs[3, 1], "Fuzz: Velocidad", 
+            self.fuzzy.velocidad_mfs, self.fuzzy.velocidad_labels,
+            self.fuzzy.velocidad_range, 'green'
+        )
 
     def update_frame(self, f):
         # 1. Update Track Geometry
@@ -432,27 +560,30 @@ class Dashboard:
         if not info: return self._get_artists() # Skip if no debug data (falling)
 
         error_val = self.hist['error'][f]
-        lv_val = self.hist['lv'][f]
+        velocidad_val = self.hist['global_vx'][f]  # Using global X velocity as velocidad
         
-        # Fuzzification Lines/Dots (using error instead of position)
+        # Fuzzification Lines/Dots
         self.line_p.set_xdata([error_val])
-        self.line_v.set_xdata([lv_val])
-        self.dots_p.set_data([error_val]*5, [info['m_pos'][k] for k in self.fuzzy.labels])
-        self.dots_v.set_data([lv_val]*5, [info['m_vel'][k] for k in self.fuzzy.labels])
+        self.line_v.set_xdata([velocidad_val])
+        # Plot membership values for all MFs
+        error_mems = [info['m_error'][k] for k in self.fuzzy.error_labels]
+        velocidad_mems = [info['m_velocidad'][k] for k in self.fuzzy.velocidad_labels]
+        self.dots_p.set_data([error_val]*len(self.fuzzy.error_labels), error_mems)
+        self.dots_v.set_data([velocidad_val]*len(self.fuzzy.velocidad_labels), velocidad_mems)
 
-        # Heatmap
-        grid = np.zeros((5, 5))
-        for r in info['rules']: grid[r['indices'][0], r['indices'][1]] = r['str']
+        # Heatmap: velocidad (rows) x error (columns)
+        grid = np.zeros((5, 9))  # 5 velocidad MFs x 9 error MFs
+        for r in info['rules']:
+            velocidad_idx = self.fuzzy.velocidad_labels.index(r['velocidad_mf'])
+            error_idx = self.fuzzy.error_labels.index(r['error_mf'])
+            grid[velocidad_idx, error_idx] = max(grid[velocidad_idx, error_idx], r['strength'])
         self.heatmap_img.set_data(grid)
 
         # Defuzzification Bars
-        bar_h = [0] * 5
-        vals = list(self.fuzzy.sets_out.values())
+        bar_h = [0] * 9
         for r in info['rules']:
-             try:
-                idx = vals.index(r['out'])
-                bar_h[idx] = max(bar_h[idx], r['str'])
-             except ValueError: pass
+            inclinacion_idx = self.fuzzy.inclinacion_labels.index(r['inclinacion_mf'])
+            bar_h[inclinacion_idx] = max(bar_h[inclinacion_idx], r['strength'])
         
         for bar, h in zip(self.out_bars, bar_h): bar.set_height(h)
         self.out_line.set_xdata([info['output']])
@@ -468,6 +599,58 @@ class Dashboard:
         ani = FuncAnimation(self.fig, self.update_frame, frames=len(self.hist['x']), interval=20, blit=False)
         plt.show()
 
+def controller(piso, posX, nivel):
+    """
+    Calculate error based on current position, floor, and level.
+    Args:
+        piso: current floor index (1-7, MATLAB 1-based, we use 0-based internally)
+        posX: current X position
+        nivel: current level (1-4, MATLAB 1-based, we use 0-based internally)
+    Returns:
+        error: position error (posX - target_x)
+    """
+    # Initialize finales matrix: [Nivel x Piso x Coordenada(X,Y)]
+    # Note: MATLAB uses 1-based indexing, Python uses 0-based
+    finales = np.zeros((4, 7, 2))
+    
+    # --- CONFIGURACIÓN DE METAS (X, Y) ---
+    
+    # NIVEL 1 (index 0)
+    finales[0, :, 0] = [0, 0, 0, 0, 0, 0, -0.02554]  # Valores X
+    finales[0, :, 1] = [0.11429, 0.06857, 0.02286, -0.02286, -0.06857, -0.11429, -0.16035]  # Valores Y
+    
+    # NIVEL 2 (index 1)
+    finales[1, :, 0] = [0.06211, -0.04758, 0.04969, -0.04847, 0.04406, -0.05409, -0.02554]  # Fixed typo: 0.05a409 -> 0.05409
+    finales[1, :, 1] = [0.11223, 0.06799, 0.02154, -0.02411, -0.06961, -0.11585, -0.16035]
+    
+    # NIVEL 3 (index 2)
+    finales[2, :, 0] = [0.12394, -0.09503, 0.09924, -0.0968, 0.08803, -0.108, -0.02554]
+    finales[2, :, 1] = [0.10605, 0.06374, 0.01759, -0.02787, -0.07271, -0.12053, -0.16035]
+    
+    # NIVEL 4 (index 3)
+    finales[3, :, 0] = [0.12394, 0.14224, 0.14851, -0.14488, 0.1318, -0.108, -0.02554]
+    finales[3, :, 1] = [0.10605, 0.05771, 0.01102, -0.03412, -0.07789, -0.12053, -0.16035]
+    
+    # --- EXTRACCIÓN Y CÁLCULO DEL ERROR ---
+    
+    # Convert from MATLAB 1-based to Python 0-based indexing
+    nivel_idx = nivel - 1
+    piso_idx = piso - 1
+    
+    # Bounds checking
+    if nivel_idx < 0 or nivel_idx >= 4:
+        nivel_idx = 0
+    if piso_idx < 0 or piso_idx >= 7:
+        piso_idx = 0
+    
+    # Get target X position
+    end_x = finales[nivel_idx, piso_idx, 0]
+    
+    # Calculate error: posX - end_x
+    error = posX - end_x
+    
+    return error
+
 def main():
     # 1. Setup
     config = SimulationConfig()
@@ -476,12 +659,12 @@ def main():
     fuzzy = FuzzyController()
     
     # 2. Simulation Loop
-    history = {'x': [], 'y': [], 'angle': [], 'lx': [], 'lv': [], 'debug': [], 'setpoint': [], 'error': []}
+    history = {'x': [], 'y': [], 'angle': [], 'lx': [], 'lv': [], 'global_vx': [], 'debug': [], 'setpoint': [], 'error': []}
     current_angle = 0.0
     
     # Simulation parameters for CSV export
     Ts = 0.033  # Sampling time in seconds
-    simulation_duration = 2  # 10 seconds
+    simulation_duration = 30  # 10 seconds
     num_steps = int(simulation_duration / Ts)  # Number of steps for 10 seconds
     
     # Update physics dt to match simulation sampling time
@@ -489,12 +672,32 @@ def main():
     
     print(f"Simulating for {simulation_duration} seconds with Ts = {Ts} s ({num_steps} steps)...")
     for step in range(num_steps):
-        # Compute error (setpoint - position) for fuzzy controller
-        error = config.setpoint - ball.global_x
+        # Get current floor index (0-based) and convert to MATLAB 1-based piso
+        piso = ball.current_floor_idx + 1 if ball.current_floor_idx >= 0 else 1
+        
+        # Calculate error using controller function
+        error = controller(piso, ball.global_x, config.nivel)
+        
+        # Calculate target position (setpoint) for visualization
+        # Reconstruct finales matrix to get target
+        finales = np.zeros((4, 7, 2))
+        finales[0, :, 0] = [0, 0, 0, 0, 0, 0, -0.02554]
+        finales[1, :, 0] = [0.06211, -0.04758, 0.04969, -0.04847, 0.04406, -0.05409, -0.02554]
+        finales[2, :, 0] = [0.12394, -0.09503, 0.09924, -0.0968, 0.08803, -0.108, -0.02554]
+        finales[3, :, 0] = [0.12394, 0.14224, 0.14851, -0.14488, 0.1318, -0.108, -0.02554]
+        nivel_idx = config.nivel - 1
+        piso_idx = piso - 1
+        if nivel_idx < 0 or nivel_idx >= 4: nivel_idx = 0
+        if piso_idx < 0 or piso_idx >= 7: piso_idx = 0
+        target_x = finales[nivel_idx, piso_idx, 0]
+        
+        # Compute fuzzy controller output (error, velocidad)
+        # Note: velocidad is the velocity in X direction (global_vx)
         output, debug = fuzzy.compute(error, ball.global_vx)
+        
         # Convert fuzzy output to target angle (output is already in correct range)
-        #target_angle = np.clip(-output, -np.radians(config.max_tilt), np.radians(config.max_tilt))
-        target_angle = -0.12
+        # The output is inclinacion, which directly maps to tilt angle
+        target_angle = np.clip(output, -np.radians(config.max_tilt), np.radians(config.max_tilt))
         
 
         # Kinematics Step
@@ -512,7 +715,8 @@ def main():
         history['angle'].append(current_angle)
         history['lx'].append(ball.local_x)
         history['lv'].append(ball.local_v)
-        history['setpoint'].append(config.setpoint)
+        history['global_vx'].append(ball.global_vx)
+        history['setpoint'].append(target_x)
         history['error'].append(error)
         history['debug'].append(debug)
 
