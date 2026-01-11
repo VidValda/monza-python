@@ -3,205 +3,268 @@ import json
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from scipy.interpolate import interp1d
+from dataclasses import dataclass
+from typing import Dict, List, Tuple, Optional
+
+# --- Configuration ---
+@dataclass
+class PhysicsParams:
+    dt: float = 0.01
+    gravity: float = 9.81
+    friction: float = 0.01
+    restitution: float = 0.1  # Bounciness
+    sub_steps: int = 10       # Physics accuracy
+
+@dataclass
+class SimulationConfig:
+    diff_path: str = 'dificultad1.json'
+    circ_path: str = 'circulos.json'
+    duration_steps: int = 2000
+    max_tilt: float = 45.0    # Degrees
+    max_omega: float = 8.0    # Rad/s
+    setpoint: float = 0.0      # Target position for fuzzy controller
+
+# --- Helper Functions ---
+def rotate_vector(x: float, y: float, angle: float) -> Tuple[float, float]:
+    """Rotates a vector (x, y) by a given angle."""
+    c, s = np.cos(angle), np.sin(angle)
+    return x * c - y * s, x * s + y * c
+
+def inverse_rotate_vector(x: float, y: float, angle: float) -> Tuple[float, float]:
+    """Inverse rotation (global to local)."""
+    c, s = np.cos(angle), np.sin(angle)
+    return x * c + y * s, -x * s + y * c
 
 class Level:
-    def __init__(self, diff_path, circ_path):
+    def __init__(self, config: SimulationConfig):
         self.floors = {}
-        self.visuals = []
-        self._load_data(diff_path, circ_path)
+        self.visual_segments = []
+        self._load_level_data(config.diff_path, config.circ_path)
 
-    def _load_data(self, d_path, c_path):
+    def _load_level_data(self, d_path, c_path):
         try:
             with open(d_path, 'r') as f: d_data = json.load(f)
             with open(c_path, 'r') as f: c_data = json.load(f)
         except FileNotFoundError:
-            print(f"Error: Files {d_path} or {c_path} not found")
+            print(f"Error: Could not load level files.")
             return
 
-        for i in range(0, 20):
-            xk, yk = f'xp{i}', f'yp{i}'
-            if i == 0: xk, yk = 'xp','yp'
+        # Process Function segments (xp0, yp0, etc.)
+        for i in range(20):
+            xk = f'xp{i}' if i > 0 else 'xp'
+            yk = f'yp{i}' if i > 0 else 'yp'
+            
             if xk in d_data and yk in d_data:
-                x = np.array(d_data[xk]).flatten()
-                y = np.array(d_data[yk]).flatten()
-                idx = np.argsort(x)
-                x, y = x[idx], y[idx]
-                dx = np.gradient(x)
-                dx[dx == 0] = 1e-9
-                slope = np.gradient(y) / dx
-                self.floors[i] = {
-                    'func': interp1d(x, y, kind='cubic', fill_value="extrapolate"),
-                    'slope': interp1d(x, slope, kind='linear', fill_value="extrapolate"),
-                    'min': x[0],
-                    'max': x[-1]
-                }
-                self.visuals.append((x, y))
+                self._process_floor_segment(i, d_data[xk], d_data[yk])
 
+        # Process Line segments
         i = 1
         while True:
             xk, yk = f'xl{i}', f'yl{i}'
             if xk not in d_data: break
-            self.visuals.append((np.array(d_data[xk]).flatten(), np.array(d_data[yk]).flatten()))
+            self.visual_segments.append((np.array(d_data[xk]).flatten(), np.array(d_data[yk]).flatten()))
             i += 1
 
+        # Process Circle segments
         r_keys = sorted([k for k in c_data if k.startswith('r')], key=lambda x: int(x[1:]))
         for i in range(0, len(r_keys), 2):
             if i + 1 < len(r_keys):
-                self.visuals.append((np.array(c_data[r_keys[i]]).flatten(), np.array(c_data[r_keys[i+1]]).flatten()))
+                self.visual_segments.append((np.array(c_data[r_keys[i]]).flatten(), np.array(c_data[r_keys[i+1]]).flatten()))
+
+    def _process_floor_segment(self, index, x_raw, y_raw):
+        x = np.array(x_raw).flatten()
+        y = np.array(y_raw).flatten()
+        
+        # Sort by X to ensure interpolation works
+        idx = np.argsort(x)
+        x, y = x[idx], y[idx]
+        
+        # Calculate slope derivatives
+        dx = np.gradient(x)
+        dx[dx == 0] = 1e-9 # Avoid div by zero
+        slope = np.gradient(y) / dx
+
+        self.floors[index] = {
+            'func': interp1d(x, y, kind='cubic', fill_value="extrapolate"),
+            'slope': interp1d(x, slope, kind='linear', fill_value="extrapolate"),
+            'min': x[0],
+            'max': x[-1]
+        }
+        self.visual_segments.append((x, y))
 
 class PhysicsBall:
-    def __init__(self, level, start_idx=0):
+    def __init__(self, level: Level, start_idx=0):
         self.lvl = level
-        self.idx = start_idx
-        self.state = "ROLLING"
-        self.lx = 0.01
+        self.params = PhysicsParams()
         
-        if self.idx in self.lvl.floors:
-            self.ly = float(self.lvl.floors[self.idx]['func'](self.lx))
+        # State
+        self.current_floor_idx = start_idx
+        self.state = "ROLLING"
+        
+        # Local coordinates (relative to track)
+        self.local_x = 0.01 
+        self.local_v = 0.0
+        
+        # Global coordinates
+        self.global_x, self.global_y = 0.0, 0.0
+        self.global_vx, self.global_vy = 0.0, 0.0
+
+        # Initialize Height
+        if self.current_floor_idx in self.lvl.floors:
+            self.local_y = float(self.lvl.floors[self.current_floor_idx]['func'](self.local_x))
         else:
-            self.idx = -1
-            self.ly = 0.0
+            self.current_floor_idx = -1
+            self.local_y = 0.0
             self.state = "FALLING"
 
-        self.lv = 0.0
-        self.gx, self.gy = 0.0, 0.0
-        self.gvx, self.gvy = 0.0, 0.0
-        self.params = {'dt': 0.01, 'g': 9.81, 'fric': 0.01, 'rest': 0.3}
-
-    def _to_global(self, lx, ly, ang):
-        c, s = np.cos(ang), np.sin(ang)
-        return lx * c - ly * s, lx * s + ly * c
-
-    def _to_local(self, gx, gy, ang):
-        c, s = np.cos(ang), np.sin(ang)
-        return gx * c + gy * s, -gx * s + gy * c
-
     def update(self, angle, d_angle_dt):
-        sub_steps = 10
-        dt = self.params['dt'] / sub_steps
-        g = self.params['g']
-
-        for _ in range(sub_steps):
+        dt_step = self.params.dt / self.params.sub_steps
+        
+        for _ in range(self.params.sub_steps):
             if self.state == "ROLLING":
-                if self.idx not in self.lvl.floors: self.state = "FALLING"; continue
-                floor = self.lvl.floors[self.idx]
-                slope = float(floor['slope'](self.lx))
-                alpha = np.arctan(slope)
-                
-                accel = -g * np.sin(alpha + angle) - self.params['fric'] * self.lv
-                self.lv += accel * dt
-                self.lx += self.lv * dt
-                self.ly = float(floor['func'](self.lx))
-                
-                self.gx, self.gy = self._to_global(self.lx, self.ly, angle)
-                
-                if self.lx < floor['min'] or self.lx > floor['max']:
-                    self.state = "FALLING"
-                    vx_loc = self.lv
-                    vy_loc = slope * self.lv
-                    
-                    gvx_rel, gvy_rel = self._to_global(vx_loc, vy_loc, angle)
-                    vx_tan = -d_angle_dt * self.gy
-                    vy_tan = d_angle_dt * self.gx
-                    
-                    self.gvx, self.gvy = gvx_rel + vx_tan, gvy_rel + vy_tan
-
+                self._handle_rolling(dt_step, angle, d_angle_dt)
             elif self.state == "FALLING":
-                self.gvy -= g * dt
-                self.gx += self.gvx * dt
-                self.gy += self.gvy * dt
+                self._handle_falling(dt_step, angle)
                 
-                for f_idx, floor in self.lvl.floors.items():    
-                    lx_chk, ly_chk = self._to_local(self.gx, self.gy, angle)
-                    
-                    if floor['min'] <= lx_chk <= floor['max']:
-                        target_y = float(floor['func'](lx_chk))
-                        
-                        if ly_chk <= target_y:
-                            slope = float(floor['slope'](lx_chk))
-                            floor_angle = np.arctan(slope) + angle
-                            
-                            nx = -np.sin(floor_angle)
-                            ny = np.cos(floor_angle)
-                            
-                            v_dot_n = self.gvx * nx + self.gvy * ny
-                            
-                            if v_dot_n < 0:
-                                j = -(1 + self.params['rest']) * v_dot_n
-                                self.gvx += j * nx
-                                self.gvy += j * ny
-                                
-                                self.gx += nx * (target_y - ly_chk + 0.001)
-                                self.gy += ny * (target_y - ly_chk + 0.001)
+        return self.global_x, self.global_y
 
-                                if abs(v_dot_n) < 0.5:
-                                    self.state = "ROLLING"
-                                    self.idx = f_idx
-                                    self.lx = lx_chk
-                                    self.ly = target_y
-                                    
-                                    tx = np.cos(floor_angle)
-                                    ty = np.sin(floor_angle)
-                                    self.lv = self.gvx * tx + self.gvy * ty
-                                    break
-        return self.gx, self.gy
+    def _handle_rolling(self, dt, angle, d_angle_dt):
+        if self.current_floor_idx not in self.lvl.floors:
+            self.state = "FALLING"
+            return
+
+        floor = self.lvl.floors[self.current_floor_idx]
+        slope_val = float(floor['slope'](self.local_x))
+        alpha = np.arctan(slope_val)
+        
+        # Physics Equation: Gravity component + Friction
+        accel = -self.params.gravity * np.sin(alpha + angle) - self.params.friction * self.local_v
+        
+        self.local_v += accel * dt
+        self.local_x += self.local_v * dt
+        self.local_y = float(floor['func'](self.local_x))
+        
+        self.global_x, self.global_y = rotate_vector(self.local_x, self.local_y, angle)
+        
+        # Check if ball rolled off the edge
+        if self.local_x < floor['min'] or self.local_x > floor['max']:
+            self._transition_to_falling(slope_val, angle, d_angle_dt)
+
+    def _transition_to_falling(self, slope, angle, d_angle_dt):
+        self.state = "FALLING"
+        
+        # Convert local velocity to global velocity
+        vx_loc = self.local_v
+        vy_loc = slope * self.local_v
+        
+        gvx_rel, gvy_rel = rotate_vector(vx_loc, vy_loc, angle)
+        
+        # Add tangential velocity from the platform rotation
+        vx_tan = -d_angle_dt * self.global_y
+        vy_tan = d_angle_dt * self.global_x
+        
+        self.global_vx = gvx_rel + vx_tan
+        self.global_vy = gvy_rel + vy_tan
+
+    def _handle_falling(self, dt, angle):
+        # Gravity
+        self.global_vy -= self.params.gravity * dt
+        self.global_x += self.global_vx * dt
+        self.global_y += self.global_vy * dt
+        
+        # Collision Detection
+        for f_idx, floor in self.lvl.floors.items():    
+            lx_chk, ly_chk = inverse_rotate_vector(self.global_x, self.global_y, angle)
+            
+            # Check X bounds
+            if floor['min'] <= lx_chk <= floor['max']:
+                target_y = float(floor['func'](lx_chk))
+                
+                # Check Y collision (tunneling check simplified)
+                if ly_chk <= target_y:
+                    self._resolve_collision(lx_chk, ly_chk, target_y, floor, angle, f_idx)
+                    if self.state == "ROLLING": break
+
+    def _resolve_collision(self, lx, ly, target_y, floor, angle, f_idx):
+        slope = float(floor['slope'](lx))
+        floor_angle = np.arctan(slope) + angle
+        
+        nx, ny = -np.sin(floor_angle), np.cos(floor_angle)
+        v_dot_n = self.global_vx * nx + self.global_vy * ny
+        
+        if v_dot_n < 0:
+            # Bounce
+            j = -(1 + self.params.restitution) * v_dot_n
+            self.global_vx += j * nx
+            self.global_vy += j * ny
+            
+            # Penetration fix
+            fix = target_y - ly + 0.001
+            self.global_x += nx * fix
+            self.global_y += ny * fix
+
+            # Stick to floor if impact is low
+            if abs(v_dot_n) < 0.5:
+                self.state = "ROLLING"
+                self.current_floor_idx = f_idx
+                self.local_x = lx
+                self.local_y = target_y
+                
+                # Project global velocity back to local tangent
+                tx, ty = np.cos(floor_angle), np.sin(floor_angle)
+                self.local_v = self.global_vx * tx + self.global_vy * ty
+
 
 class FuzzyController:
     def __init__(self):
-        # Ordered keys for visualization purposes
         self.labels = ['NB', 'NS', 'Z', 'PS', 'PB']
         
-        self.sets_pos = {
-            'NB': -0.3, 'NS': -0.2, 'Z': 0.0, 'PS': 0.2, 'PB': 0.3
-        }
-        self.sets_vel = {
-            'NB': -0.5, 'NS': -0.25, 'Z': 0.0, 'PS': 0.25, 'PB': 0.5
-        }
-        self.sets_out = {
-            'NB': -0.5, 'NS': -0.25, 'Z': 0.0, 'PS': 0.25, 'PB': 0.5
-        }
+        # Membership Centers - expanded ranges for error control
+        # Error = setpoint - position: positive error means position is left of setpoint
+        self.sets_pos = {'NB': -0.5, 'NS': -0.25, 'Z': 0.0, 'PS': 0.25, 'PB': 0.5}
+        self.sets_vel = {'NB': -0.5, 'NS': -0.25, 'Z': 0.0, 'PS': 0.25, 'PB': 0.5}
+        # Output range matches max tilt (45 degrees = 0.785 radians)
+        self.sets_out = {'NB': -0.785, 'NS': -0.4, 'Z': 0.0, 'PS': 0.4, 'PB': 0.785}
         
-        # Rule Base stored as a list of tuples
-        self.rules = [
-            ('NB', 'NB', 'PB'), ('NB', 'NS', 'PB'), ('NB', 'Z',  'PB'), ('NB', 'PS', 'PB'), ('NB', 'PB', 'PS'), 
-            ('NS', 'NB', 'PB'), ('NS', 'NS', 'PB'), ('NS', 'Z',  'PS'), ('NS', 'PS', 'PS'), ('NS', 'PB', 'Z'),
-            ('Z',  'NB', 'PB'), ('Z',  'NS', 'PS'), ('Z',  'Z',  'NB'), ('Z',  'PS', 'NS'), ('Z',  'PB', 'NB'),
-            ('PS', 'NB', 'Z'),  ('PS', 'NS', 'NS'), ('PS', 'Z',  'NS'), ('PS', 'PS', 'NB'), ('PS', 'PB', 'NB'),
-            ('PB', 'NB', 'NS'), ('PB', 'NS', 'NB'), ('PB', 'Z',  'NB'), ('PB', 'PS', 'NB'), ('PB', 'PB', 'NB'),
+        # Rule Base: (Error, Velocity, Output)
+        # For error control: positive error (position left of setpoint) needs positive output (tilt right)
+        # Negative error (position right of setpoint) needs negative output (tilt left)
+        # This is INVERTED from position control (error = setpoint - position)
+        self.rules_def = [
+            ('NB', 'NB', 'NB'), ('NB', 'NS', 'NB'), ('NB', 'Z',  'NB'), ('NB', 'PS', 'NB'), ('NB', 'PB', 'NS'), 
+            ('NS', 'NB', 'NB'), ('NS', 'NS', 'NB'), ('NS', 'Z',  'NS'), ('NS', 'PS', 'NS'), ('NS', 'PB', 'Z'),
+            ('Z',  'NB', 'NS'), ('Z',  'NS', 'NS'), ('Z',  'Z',  'Z'), ('Z',  'PS', 'PS'), ('Z',  'PB', 'PS'),
+            ('PS', 'NB', 'Z'), ('PS', 'NS', 'PS'), ('PS', 'Z',  'PS'), ('PS', 'PS', 'PB'), ('PS', 'PB', 'PB'),
+            ('PB', 'NB', 'PS'), ('PB', 'NS', 'PB'), ('PB', 'Z',  'PB'), ('PB', 'PS', 'PB'), ('PB', 'PB', 'PB'),
         ]
 
     def _trimf(self, x, abc):
+        """Triangular membership function generator."""
         a, b, c = abc
-        # Triangular membership function
         return max(min((x - a) / (b - a + 1e-9), (c - x) / (c - b + 1e-9)), 0)
 
     def _get_memberships(self, val, sets):
+        """Calculates membership degree for all sets."""
         mems = {}
-        keys = self.labels
-        vals = [sets[k] for k in keys]
+        vals = [sets[k] for k in self.labels]
         
-        for i, k in enumerate(keys):
+        for i, k in enumerate(self.labels):
             center = vals[i]
-            # Determine neighbors for triangle width
             left = vals[i-1] if i > 0 else center - (vals[i+1]-center)
             right = vals[i+1] if i < len(vals)-1 else center + (center-vals[i-1])
             mems[k] = self._trimf(val, [left, center, right])
         return mems
 
     def compute(self, pos, vel):
-        # Step 1: Fuzzification
+        # 1. Fuzzification
         m_pos = self._get_memberships(pos, self.sets_pos)
         m_vel = self._get_memberships(vel, self.sets_vel)
         
-        numerator = 0.0
-        denominator = 0.0
+        numerator, denominator = 0.0, 0.0
+        active_rules = [] 
         
-        # Data for visualization
-        active_rules = [] # Stores ((pos_idx, vel_idx), strength, out_val)
-        
-        # Step 2: Rule Evaluation
-        for r_pos, r_vel, r_out in self.rules:
-            # Min operator (AND)
+        # 2. Rule Evaluation
+        for r_pos, r_vel, r_out in self.rules_def:
             strength = min(m_pos[r_pos], m_vel[r_vel])
             
             if strength > 0:
@@ -209,213 +272,206 @@ class FuzzyController:
                 numerator += strength * center
                 denominator += strength
                 
-                # Store info for heatmap (indices for plotting)
+                # Debug info
                 p_idx = self.labels.index(r_pos)
                 v_idx = self.labels.index(r_vel)
                 active_rules.append({'indices': (v_idx, p_idx), 'str': strength, 'out': center})
                 
-        # Step 3: Defuzzification (Center of Gravity / Weighted Average)
-        if denominator == 0:
-            out = 0.0
-        else:
-            out = numerator / denominator
+        # 3. Defuzzification (Weighted Average)
+        output = numerator / denominator if denominator != 0 else 0.0
             
-        debug_info = {
-            'm_pos': m_pos,
-            'm_vel': m_vel,
-            'rules': active_rules,
-            'output': out
+        return output, {
+            'm_pos': m_pos, 'm_vel': m_vel, 'rules': active_rules, 'output': output
         }
-        return out, debug_info
+        
+class Dashboard:
+    def __init__(self, level: Level, fuzzy: FuzzyController, history: Dict):
+        self.lvl = level
+        self.fuzzy = fuzzy
+        self.hist = history
+        self.fig = plt.figure(figsize=(16, 10))
+        self.gs = self.fig.add_gridspec(4, 3)
+        self.artists = []
+        
+        self._setup_track_view()
+        self._setup_heatmap()
+        self._setup_defuzz_view()
+        self._setup_setpoint_plot()
+        self._setup_fuzz_pos()
+        self._setup_fuzz_vel()
+        plt.tight_layout()
 
-def run_controlled_simulation(level, ball):
+    def _setup_track_view(self):
+        ax = self.fig.add_subplot(self.gs[0:2, 0:2])
+        ax.set_title("Simulation")
+        ax.set_xlim(-0.5, 0.5); ax.set_ylim(-0.5, 0.5); ax.set_aspect('equal')
+        ax.grid(True, alpha=0.3)
+        self.track_lines = [ax.plot([], [], 'k-', lw=1.5)[0] for _ in self.lvl.visual_segments]
+        self.ball_dot, = ax.plot([], [], 'ro', markersize=8, zorder=10)
+        self.ball_trace, = ax.plot([], [], 'r-', lw=0.5, alpha=0.5)
+
+    def _setup_heatmap(self):
+        ax = self.fig.add_subplot(self.gs[0, 2])
+        ax.set_title("Active Rules Matrix")
+        ax.set_xlabel("Pos Error"); ax.set_ylabel("Velocity")
+        ax.set_xticks(range(5)); ax.set_xticklabels(self.fuzzy.labels)
+        ax.set_yticks(range(5)); ax.set_yticklabels(self.fuzzy.labels)
+        self.heatmap_img = ax.imshow(np.zeros((5, 5)), cmap='Reds', vmin=0, vmax=1, origin='lower')
+
+    def _setup_defuzz_view(self):
+        ax = self.fig.add_subplot(self.gs[1, 2])
+        ax.set_title("Defuzzification")
+        ax.set_xlim(-0.6, 0.6); ax.set_ylim(0, 1.1)
+        ax.grid(True, alpha=0.3)
+        for k, v in self.fuzzy.sets_out.items():
+            ax.axvline(v, color='gray', linestyle=':', alpha=0.5)
+            ax.text(v, 1.02, k, ha='center', fontsize=8)
+        self.out_bars = ax.bar(list(self.fuzzy.sets_out.values()), [0]*5, width=0.05, color='blue', alpha=0.6)
+        self.out_line = ax.axvline(0, color='red', lw=2)
+
+    def _setup_fuzz_plot(self, gs_pos, title, set_dict, color):
+        ax = self.fig.add_subplot(gs_pos)
+        ax.set_title(title)
+        ax.set_ylim(0, 1.1)
+        
+        # Draw static MF triangles
+        x_static = np.linspace(-1, 1, 100)
+        for k in self.fuzzy.labels:
+            vals = [set_dict[x] for x in self.fuzzy.labels]
+            i = self.fuzzy.labels.index(k)
+            c = vals[i]
+            l = vals[i-1] if i > 0 else c - (vals[i+1]-c)
+            r = vals[i+1] if i < len(vals)-1 else c + (c-vals[i-1])
+            y = [self.fuzzy._trimf(xi, [l, c, r]) for xi in x_static]
+            ax.plot(x_static, y, 'k-', lw=0.5, alpha=0.5)
+            ax.fill_between(x_static, 0, y, alpha=0.05, color=color)
+        
+        line = ax.axvline(0, color='red', lw=1.5)
+        dots, = ax.plot([], [], f'{color[0]}o')
+        return line, dots
+
+    def _setup_setpoint_plot(self):
+        ax = self.fig.add_subplot(self.gs[2, 0:2])
+        ax.set_title("Position vs Setpoint")
+        ax.set_xlabel("Time Step")
+        ax.set_ylabel("Position")
+        ax.grid(True, alpha=0.3)
+        self.setpoint_line, = ax.plot([], [], 'g--', lw=2, label='Setpoint', alpha=0.7)
+        self.position_line, = ax.plot([], [], 'b-', lw=1.5, label='Position')
+        self.error_line, = ax.plot([], [], 'r-', lw=1, label='Error', alpha=0.6)
+        ax.legend(loc='upper right')
+        ax.set_xlim(0, len(self.hist['x']))
+        if len(self.hist['x']) > 0:
+            all_vals = self.hist['x'] + self.hist['setpoint'] + self.hist['error']
+            if all_vals:
+                y_min, y_max = min(all_vals), max(all_vals)
+                y_range = y_max - y_min
+                ax.set_ylim(y_min - 0.1*y_range, y_max + 0.1*y_range)
+
+    def _setup_fuzz_pos(self):
+        self.line_p, self.dots_p = self._setup_fuzz_plot(self.gs[3, 0], "Fuzz: Error (setpoint - pos)", self.fuzzy.sets_pos, 'blue')
+
+    def _setup_fuzz_vel(self):
+        self.line_v, self.dots_v = self._setup_fuzz_plot(self.gs[3, 1], "Fuzz: Vel (lv)", self.fuzzy.sets_vel, 'green')
+
+    def update_frame(self, f):
+        # 1. Update Track Geometry
+        ang = self.hist['angle'][f]
+        for ln, (lx, ly) in zip(self.track_lines, self.lvl.visual_segments):
+            gx, gy = rotate_vector(lx, ly, ang)
+            ln.set_data(gx, gy)
+        
+        self.ball_dot.set_data([self.hist['x'][f]], [self.hist['y'][f]])
+        self.ball_trace.set_data(self.hist['x'][max(0, f-50):f], self.hist['y'][max(0, f-50):f])
+
+        # 2. Update Setpoint Plot
+        time_steps = list(range(f+1))
+        self.setpoint_line.set_data(time_steps, self.hist['setpoint'][:f+1])
+        self.position_line.set_data(time_steps, self.hist['x'][:f+1])
+        self.error_line.set_data(time_steps, self.hist['error'][:f+1])
+
+        # 3. Update Debug Visuals
+        info = self.hist['debug'][f]
+        if not info: return self._get_artists() # Skip if no debug data (falling)
+
+        error_val = self.hist['error'][f]
+        lv_val = self.hist['lv'][f]
+        
+        # Fuzzification Lines/Dots (using error instead of position)
+        self.line_p.set_xdata([error_val])
+        self.line_v.set_xdata([lv_val])
+        self.dots_p.set_data([error_val]*5, [info['m_pos'][k] for k in self.fuzzy.labels])
+        self.dots_v.set_data([lv_val]*5, [info['m_vel'][k] for k in self.fuzzy.labels])
+
+        # Heatmap
+        grid = np.zeros((5, 5))
+        for r in info['rules']: grid[r['indices'][0], r['indices'][1]] = r['str']
+        self.heatmap_img.set_data(grid)
+
+        # Defuzzification Bars
+        bar_h = [0] * 5
+        vals = list(self.fuzzy.sets_out.values())
+        for r in info['rules']:
+             try:
+                idx = vals.index(r['out'])
+                bar_h[idx] = max(bar_h[idx], r['str'])
+             except ValueError: pass
+        
+        for bar, h in zip(self.out_bars, bar_h): bar.set_height(h)
+        self.out_line.set_xdata([info['output']])
+        
+        return self._get_artists()
+
+    def _get_artists(self):
+        return self.track_lines + [self.ball_dot, self.ball_trace, self.setpoint_line, 
+                                   self.position_line, self.error_line, self.line_p, self.dots_p, 
+                                   self.line_v, self.dots_v, self.heatmap_img, self.out_line] + list(self.out_bars)
+
+    def show(self):
+        ani = FuncAnimation(self.fig, self.update_frame, frames=len(self.hist['x']), interval=20, blit=False)
+        plt.show()
+
+def main():
+    # 1. Setup
+    config = SimulationConfig()
+    level = Level(config)
+    ball = PhysicsBall(level, start_idx=0)
     fuzzy = FuzzyController()
     
-    # Pre-calculate static triangles for visualization background
-    x_static = np.linspace(-1, 1, 100)
-    static_plots = {'pos': [], 'vel': []}
-    for k in fuzzy.labels:
-        # Generate y-values for Position MF triangles
-        vals = [fuzzy.sets_pos[x] for x in fuzzy.labels]
-        i = fuzzy.labels.index(k)
-        c = vals[i]
-        l = vals[i-1] if i > 0 else c - (vals[i+1]-c)
-        r = vals[i+1] if i < len(vals)-1 else c + (c-vals[i-1])
-        y = [fuzzy._trimf(xi, [l, c, r]) for xi in x_static]
-        static_plots['pos'].append((x_static, y, k))
-        
-        # Generate y-values for Velocity MF triangles
-        vals = [fuzzy.sets_vel[x] for x in fuzzy.labels]
-        i = fuzzy.labels.index(k)
-        c = vals[i]
-        l = vals[i-1] if i > 0 else c - (vals[i+1]-c)
-        r = vals[i+1] if i < len(vals)-1 else c + (c-vals[i-1])
-        y = [fuzzy._trimf(xi, [l, c, r]) for xi in x_static]
-        static_plots['vel'].append((x_static, y, k))
-
-    # History storage
-    hist = {
-        'x': [], 'y': [], 'angle': [], 
-        'lx': [], 'lv': [], 'debug': [],
-        'state': [] # 1 for rolling, 0 for falling
-    }
-    
-    steps = 2000
-    dt = 0.01
+    # 2. Simulation Loop
+    history = {'x': [], 'y': [], 'angle': [], 'lx': [], 'lv': [], 'debug': [], 'setpoint': [], 'error': []}
     current_angle = 0.0
     
     print("Simulating...")
-    for s in range(steps):
-        target_angle = 0.0
-        debug_data = None
-        
-        if ball.state == "ROLLING":
-            control_output, debug_data = fuzzy.compute(ball.lx, ball.lv)
-            target_angle = -control_output 
-            target_angle = np.clip(target_angle, -np.radians(45), np.radians(45))
-        else:
-            target_angle = 0.0
-            # Empty debug data if falling
-            debug_data = {'m_pos':{k:0 for k in fuzzy.labels}, 'm_vel':{k:0 for k in fuzzy.labels}, 'rules':[], 'output':0}
+    for _ in range(config.duration_steps):
+        # Compute error (setpoint - position) for fuzzy controller
+        error = config.setpoint - ball.global_x
+        output, debug = fuzzy.compute(error, ball.global_vx)
+        # Convert fuzzy output to target angle (output is already in correct range)
+        target_angle = np.clip(output, -np.radians(config.max_tilt), np.radians(config.max_tilt))
 
+        # Kinematics Step
         angle_diff = target_angle - current_angle
-        omega = np.clip(angle_diff / dt, -8.0, 8.0)
-        new_angle = current_angle + omega * dt
+        omega = np.clip(angle_diff / 0.01, -config.max_omega, config.max_omega)
+        new_angle = current_angle + omega * 0.01
         
+        # Physics Step
         gx, gy = ball.update(new_angle, omega)
         current_angle = new_angle
         
-        hist['x'].append(gx)
-        hist['y'].append(gy)
-        hist['angle'].append(current_angle)
-        hist['lx'].append(ball.lx)
-        hist['lv'].append(ball.lv)
-        hist['state'].append(ball.state == "ROLLING")
-        hist['debug'].append(debug_data)
-        
+        # Record Data
+        history['x'].append(gx)
+        history['y'].append(gy)
+        history['angle'].append(current_angle)
+        history['lx'].append(ball.local_x)
+        history['lv'].append(ball.local_v)
+        history['setpoint'].append(config.setpoint)
+        history['error'].append(error)
+        history['debug'].append(debug)
 
-    # --- Dashboard Setup ---
-    fig = plt.figure(figsize=(14, 9))
-    gs = fig.add_gridspec(3, 3)
-
-    # 1. Main Track View (Top Left & Center)
-    ax_track = fig.add_subplot(gs[0:2, 0:2])
-    ax_track.set_title("Simulation")
-    ax_track.set_xlim(-0.5, 0.5); ax_track.set_ylim(-0.5, 0.5); ax_track.set_aspect('equal')
-    ax_track.grid(True, alpha=0.3)
-    track_lines = [ax_track.plot([], [], 'k-', lw=1.5)[0] for _ in level.visuals]
-    dot, = ax_track.plot([], [], 'ro', markersize=8, zorder=10)
-    trace, = ax_track.plot([], [], 'r-', lw=0.5, alpha=0.5)
-
-    # 2. Rule Heatmap (Top Right)
-    ax_rules = fig.add_subplot(gs[0, 2])
-    ax_rules.set_title("Active Rules Matrix")
-    ax_rules.set_xticks(range(5)); ax_rules.set_xticklabels(fuzzy.labels)
-    ax_rules.set_xlabel("Pos Error")
-    ax_rules.set_yticks(range(5)); ax_rules.set_yticklabels(fuzzy.labels)
-    ax_rules.set_ylabel("Velocity")
-    # Initialize heatmap image (5x5 grid)
-    rule_grid = np.zeros((5, 5)) 
-    heatmap = ax_rules.imshow(rule_grid, cmap='Reds', vmin=0, vmax=1, origin='lower')
-
-    # 3. Defuzzification View (Middle Right)
-    ax_out = fig.add_subplot(gs[1, 2])
-    ax_out.set_title("Defuzzification (Output)")
-    ax_out.set_xlim(-0.6, 0.6); ax_out.set_ylim(0, 1.1)
-    ax_out.grid(True, alpha=0.3)
-    # Draw Singleton locations
-    for k, v in fuzzy.sets_out.items():
-        ax_out.axvline(v, color='gray', linestyle=':', alpha=0.5)
-        ax_out.text(v, 1.02, k, ha='center', fontsize=8)
-    # Dynamic bars for rule output strengths
-    out_bars = ax_out.bar([v for v in fuzzy.sets_out.values()], [0]*5, width=0.05, color='blue', alpha=0.6)
-    out_line = ax_out.axvline(0, color='red', lw=2, label='Result')
-    
-    # 4. Fuzzification Position (Bottom Left)
-    ax_fuz_p = fig.add_subplot(gs[2, 0])
-    ax_fuz_p.set_title("Fuzzification: Pos Error (lx)")
-    ax_fuz_p.set_ylim(0, 1.1); ax_fuz_p.set_xlim(-0.4, 0.4)
-    for x, y, k in static_plots['pos']:
-        ax_fuz_p.plot(x, y, 'k-', lw=0.5, alpha=0.5)
-        ax_fuz_p.fill_between(x, 0, y, alpha=0.05, color='blue')
-        ax_fuz_p.text(fuzzy.sets_pos[k], 1.05, k, ha='center', fontsize=8)
-    line_p_curr = ax_fuz_p.axvline(0, color='red', lw=1.5)
-    dots_p, = ax_fuz_p.plot([], [], 'bo') # Intersection points
-
-    # 5. Fuzzification Velocity (Bottom Center)
-    ax_fuz_v = fig.add_subplot(gs[2, 1])
-    ax_fuz_v.set_title("Fuzzification: Velocity (lv)")
-    ax_fuz_v.set_ylim(0, 1.1); ax_fuz_v.set_xlim(-0.6, 0.6)
-    for x, y, k in static_plots['vel']:
-        ax_fuz_v.plot(x, y, 'k-', lw=0.5, alpha=0.5)
-        ax_fuz_v.fill_between(x, 0, y, alpha=0.05, color='green')
-        ax_fuz_v.text(fuzzy.sets_vel[k], 1.05, k, ha='center', fontsize=8)
-    line_v_curr = ax_fuz_v.axvline(0, color='red', lw=1.5)
-    dots_v, = ax_fuz_v.plot([], [], 'go') # Intersection points
-
-    plt.tight_layout()
-
-    def update(f):
-        # -- Update Track --
-        ang = hist['angle'][f]
-        for ln, (lx, ly) in zip(track_lines, level.visuals):
-            gx, gy = ball._to_global(lx, ly, ang)
-            ln.set_data(gx, gy)
-        dot.set_data([hist['x'][f]], [hist['y'][f]])
-        trace.set_data(hist['x'][max(0, f-50):f], hist['y'][max(0, f-50):f])
-
-        # -- Get Debug Data --
-        info = hist['debug'][f]
-        lx_val = hist['lx'][f]
-        lv_val = hist['lv'][f]
-
-        # -- Update Fuzzification Plots --
-        line_p_curr.set_xdata([lx_val])
-        line_v_curr.set_xdata([lv_val])
-        
-        # Calculate intersection y-values for dots
-        p_dots_y = [info['m_pos'][k] for k in fuzzy.labels]
-        p_dots_x = [fuzzy.sets_pos[k] for k in fuzzy.labels] # visual approximation (peaks)
-        # Actually we want the dots on the red line, so x is always lx_val
-        # But y is the membership value
-        dots_p.set_data([lx_val]*5, p_dots_y)
-        dots_v.set_data([lv_val]*5, [info['m_vel'][k] for k in fuzzy.labels])
-
-        # -- Update Rule Heatmap --
-        grid_data = np.zeros((5, 5))
-        for r in info['rules']:
-            # r['indices'] is (vel_idx, pos_idx) -> (row, col)
-            row, col = r['indices']
-            grid_data[row, col] = r['str']
-        heatmap.set_data(grid_data)
-
-        # -- Update Defuzzification --
-        # Reset bars
-        bar_heights = [0] * 5
-        # Sum up strengths for each output singleton (max or sum depending on aggregation, here we visualize contribution)
-        for r in info['rules']:
-            # Find which singleton this rule maps to
-            # We can find the index by matching the output value 'r['out']' to fuzzy.sets_out values
-            out_val = r['out']
-            # Find index in sets_out.values()
-            vals = list(fuzzy.sets_out.values())
-            try:
-                idx = vals.index(out_val)
-                # Accumulate for visualization (shows total pressure on that singleton)
-                bar_heights[idx] = max(bar_heights[idx], r['str'])
-            except ValueError: pass
-            
-        for bar, h in zip(out_bars, bar_heights):
-            bar.set_height(h)
-            
-        out_line.set_xdata([info['output']])
-
-        return track_lines + [dot, trace, line_p_curr, line_v_curr, dots_p, dots_v, heatmap, out_line] + list(out_bars)
-
-    ani = FuncAnimation(fig, update, frames=len(hist['x']), interval=20, blit=False) # blit=False for Heatmap stability
-    plt.show()
+    # 3. Visualization
+    dashboard = Dashboard(level, fuzzy, history)
+    dashboard.show()
 
 if __name__ == "__main__":
-    lvl = Level('dificultad1.json', 'circulos.json')
-    sim = PhysicsBall(lvl, start_idx=0)
-    run_controlled_simulation(lvl, sim)
+    main()
