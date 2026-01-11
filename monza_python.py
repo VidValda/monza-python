@@ -102,7 +102,7 @@ class PhysicsBall:
         self.state = "ROLLING"
         
         # Local coordinates (relative to track)
-        self.local_x = 0.01 
+        self.local_x = 0.1 
         self.local_v = 0.0
         
         # Global coordinates
@@ -361,12 +361,8 @@ class Dashboard:
         self.error_line, = ax.plot([], [], 'r-', lw=1, label='Error', alpha=0.6)
         ax.legend(loc='upper right')
         ax.set_xlim(0, len(self.hist['x']))
-        if len(self.hist['x']) > 0:
-            all_vals = self.hist['x'] + self.hist['setpoint'] + self.hist['error']
-            if all_vals:
-                y_min, y_max = min(all_vals), max(all_vals)
-                y_range = y_max - y_min
-                ax.set_ylim(y_min - 0.1*y_range, y_max + 0.1*y_range)
+        self.setpoint_ax = ax  # Store reference for dynamic updates
+        # Initial y-limits will be set dynamically in update_frame
 
     def _setup_fuzz_pos(self):
         self.line_p, self.dots_p = self._setup_fuzz_plot(self.gs[3, 0], "Fuzz: Error (setpoint - pos)", self.fuzzy.sets_pos, 'blue')
@@ -389,6 +385,16 @@ class Dashboard:
         self.setpoint_line.set_data(time_steps, self.hist['setpoint'][:f+1])
         self.position_line.set_data(time_steps, self.hist['x'][:f+1])
         self.error_line.set_data(time_steps, self.hist['error'][:f+1])
+        
+        # Update y-axis range dynamically based on current data
+        if f >= 0 and len(self.hist['x']) > 0:
+            all_vals = self.hist['x'][:f+1] + self.hist['setpoint'][:f+1] + self.hist['error'][:f+1]
+            if all_vals:
+                y_min, y_max = min(all_vals), max(all_vals)
+                y_range = y_max - y_min
+                # Add 10% padding, but ensure minimum range
+                padding = max(0.1 * y_range, 0.05) if y_range > 0 else 0.1
+                self.setpoint_ax.set_ylim(y_min - padding, y_max + padding)
 
         # 3. Update Debug Visuals
         info = self.hist['debug'][f]
@@ -448,7 +454,7 @@ def main():
         error = config.setpoint - ball.global_x
         output, debug = fuzzy.compute(error, ball.global_vx)
         # Convert fuzzy output to target angle (output is already in correct range)
-        target_angle = np.clip(output, -np.radians(config.max_tilt), np.radians(config.max_tilt))
+        target_angle = np.clip(-output, -np.radians(config.max_tilt), np.radians(config.max_tilt))
 
         # Kinematics Step
         angle_diff = target_angle - current_angle
