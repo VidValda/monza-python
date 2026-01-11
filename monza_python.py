@@ -24,7 +24,7 @@ class SimulationConfig:
     max_tilt: float = 45.0    # Degrees
     max_omega: float = 8.0    # Rad/s
     setpoint: float = 0.0      # Target position for fuzzy controller (deprecated, using controller function)
-    nivel: int = 2             # Current level (1-4, MATLAB 1-based)
+    nivel: int = 1             # Current level (1-4, MATLAB 1-based)
 
 # --- Helper Functions ---
 def rotate_vector(x: float, y: float, angle: float) -> Tuple[float, float]:
@@ -443,7 +443,7 @@ class Dashboard:
         # Larger figure with better proportions
         self.fig = plt.figure(figsize=(24, 16))
         # Better grid: 8 rows x 5 columns with improved spacing
-        self.gs = self.fig.add_gridspec(7, 5, hspace=2, wspace=0.4, 
+        self.gs = self.fig.add_gridspec(6, 5, hspace=1, wspace=0.4, 
                                         left=0.06, right=0.97, top=0.95, bottom=0.05)
         self.artists = []
         
@@ -504,7 +504,7 @@ class Dashboard:
         plt.colorbar(self.heatmap_img, ax=ax, fraction=0.046, pad=0.04)
 
     def _setup_defuzz_view(self):
-        ax = self.fig.add_subplot(self.gs[1:2, 2:3])
+        ax = self.fig.add_subplot(self.gs[2:3, 2:3])
         ax.set_title("Defuzzification", fontsize=12, fontweight='bold', pad=8)
         ax.set_xlim(-0.5, 0.5); ax.set_ylim(0, 1.1)
         ax.grid(True, alpha=0.3)
@@ -605,7 +605,7 @@ class Dashboard:
     def _setup_state_info(self):
         ax = self.fig.add_subplot(self.gs[1:2, 3:5])
         ax.axis('off')
-        ax.set_title("System State", fontsize=12, fontweight='bold', pad=30)
+        ax.set_title("System State", fontsize=12, fontweight='bold', pad=-30, loc='left')
         self.state_text = ax.text(0.1, 0.9, '', transform=ax.transAxes, fontsize=10,
                                   verticalalignment='top', family='monospace',
                                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.6, pad=8))
