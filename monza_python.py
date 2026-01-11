@@ -1,5 +1,6 @@
 import numpy as np
 import json
+import csv
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from scipy.interpolate import interp1d
@@ -11,13 +12,13 @@ from typing import Dict, List, Tuple, Optional
 class PhysicsParams:
     dt: float = 0.01
     gravity: float = 9.81
-    friction: float = 0.01
+    friction: float = 0.0223
     restitution: float = 0.1  # Bounciness
     sub_steps: int = 10       # Physics accuracy
 
 @dataclass
 class SimulationConfig:
-    diff_path: str = 'dificultad1.json'
+    diff_path: str = 'dificultad2.json'
     circ_path: str = 'circulos.json'
     duration_steps: int = 2000
     max_tilt: float = 45.0    # Degrees
@@ -103,7 +104,7 @@ class PhysicsBall:
         self.state = "ROLLING"
         
         # Local coordinates (relative to track)
-        self.local_x = 0.1 
+        self.local_x = -0.1 
         self.local_v = 0.0
         
         # Global coordinates
@@ -471,25 +472,35 @@ def main():
     # 1. Setup
     config = SimulationConfig()
     level = Level(config)
-    ball = PhysicsBall(level, start_idx=0)
+    ball = PhysicsBall(level, start_idx=1)
     fuzzy = FuzzyController()
     
     # 2. Simulation Loop
     history = {'x': [], 'y': [], 'angle': [], 'lx': [], 'lv': [], 'debug': [], 'setpoint': [], 'error': []}
     current_angle = 0.0
     
-    print("Simulating...")
-    for _ in range(config.duration_steps):
+    # Simulation parameters for CSV export
+    Ts = 0.033  # Sampling time in seconds
+    simulation_duration = 2  # 10 seconds
+    num_steps = int(simulation_duration / Ts)  # Number of steps for 10 seconds
+    
+    # Update physics dt to match simulation sampling time
+    ball.params.dt = Ts
+    
+    print(f"Simulating for {simulation_duration} seconds with Ts = {Ts} s ({num_steps} steps)...")
+    for step in range(num_steps):
         # Compute error (setpoint - position) for fuzzy controller
         error = config.setpoint - ball.global_x
         output, debug = fuzzy.compute(error, ball.global_vx)
         # Convert fuzzy output to target angle (output is already in correct range)
-        target_angle = np.clip(-output, -np.radians(config.max_tilt), np.radians(config.max_tilt))
+        #target_angle = np.clip(-output, -np.radians(config.max_tilt), np.radians(config.max_tilt))
+        target_angle = -0.12
+        
 
         # Kinematics Step
         angle_diff = target_angle - current_angle
-        omega = np.clip(angle_diff / 0.01, -config.max_omega, config.max_omega)
-        new_angle = current_angle + omega * 0.01
+        omega = np.clip(angle_diff / Ts, -config.max_omega, config.max_omega)
+        new_angle = current_angle + omega * Ts
         
         # Physics Step
         gx, gy = ball.update(new_angle, omega)
@@ -505,7 +516,18 @@ def main():
         history['error'].append(error)
         history['debug'].append(debug)
 
-    # 3. Visualization
+    # 3. Save x and y data to CSV
+    csv_filename = 'simulation_data.csv'
+    print(f"Saving simulation data to {csv_filename}...")
+    with open(csv_filename, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['time', 'x', 'y'])  # Header
+        for i in range(len(history['x'])):
+            time = i * Ts
+            writer.writerow([time, history['x'][i], history['y'][i]])
+    print(f"Data saved to {csv_filename}")
+
+    # 4. Visualization
     dashboard = Dashboard(level, fuzzy, history)
     dashboard.show()
 
