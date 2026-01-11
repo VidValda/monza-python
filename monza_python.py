@@ -24,7 +24,7 @@ class SimulationConfig:
     max_tilt: float = 45.0    # Degrees
     max_omega: float = 8.0    # Rad/s
     setpoint: float = 0.0      # Target position for fuzzy controller (deprecated, using controller function)
-    nivel: int = 1             # Current level (1-4, MATLAB 1-based)
+    nivel: int = 2             # Current level (1-4, MATLAB 1-based)
 
 # --- Helper Functions ---
 def rotate_vector(x: float, y: float, angle: float) -> Tuple[float, float]:
@@ -435,59 +435,97 @@ class FuzzyController:
         }
         
 class Dashboard:
-    def __init__(self, level: Level, fuzzy: FuzzyController, history: Dict):
+    def __init__(self, level: Level, fuzzy: FuzzyController, history: Dict, config: SimulationConfig):
         self.lvl = level
         self.fuzzy = fuzzy
         self.hist = history
-        self.fig = plt.figure(figsize=(16, 10))
-        self.gs = self.fig.add_gridspec(4, 3)
+        self.config = config
+        # Larger figure with better proportions
+        self.fig = plt.figure(figsize=(24, 16))
+        # Better grid: 8 rows x 5 columns with improved spacing
+        self.gs = self.fig.add_gridspec(7, 5, hspace=2, wspace=0.4, 
+                                        left=0.06, right=0.97, top=0.95, bottom=0.05)
         self.artists = []
         
         self._setup_track_view()
         self._setup_heatmap()
         self._setup_defuzz_view()
+        self._setup_state_info()
         self._setup_setpoint_plot()
+        self._setup_velocity_plot()
+        self._setup_control_output_plot()
+        self._setup_platform_angle_plot()
+        self._setup_phase_plot()
         self._setup_fuzz_pos()
         self._setup_fuzz_vel()
-        plt.tight_layout()
+        self._setup_output_mf_view()
 
     def _setup_track_view(self):
-        ax = self.fig.add_subplot(self.gs[0:2, 0:2])
-        ax.set_title("Simulation")
+        ax = self.fig.add_subplot(self.gs[0:3, 0:2])
+        ax.set_title("Simulation Track", fontsize=14, fontweight='bold', pad=10)
         ax.set_xlim(-0.5, 0.5); ax.set_ylim(-0.5, 0.5); ax.set_aspect('equal')
         ax.grid(True, alpha=0.3)
+        ax.set_xlabel("X Position (m)", fontsize=11)
+        ax.set_ylabel("Y Position (m)", fontsize=11)
+        
+        # Plot all setpoints for current level
+        finales = np.zeros((4, 7, 2))
+        finales[0, :, 0] = [0, 0, 0, 0, 0, 0, -0.02554]
+        finales[0, :, 1] = [0.11429, 0.06857, 0.02286, -0.02286, -0.06857, -0.11429, -0.16035]
+        finales[1, :, 0] = [0.06211, -0.04758, 0.04969, -0.04847, 0.04406, -0.05409, -0.02554]
+        finales[1, :, 1] = [0.11223, 0.06799, 0.02154, -0.02411, -0.06961, -0.11585, -0.16035]
+        finales[2, :, 0] = [0.12394, -0.09503, 0.09924, -0.0968, 0.08803, -0.108, -0.02554]
+        finales[2, :, 1] = [0.10605, 0.06374, 0.01759, -0.02787, -0.07271, -0.12053, -0.16035]
+        finales[3, :, 0] = [0.12394, 0.14224, 0.14851, -0.14488, 0.1318, -0.108, -0.02554]
+        finales[3, :, 1] = [0.10605, 0.05771, 0.01102, -0.03412, -0.07789, -0.12053, -0.16035]
+        
+        nivel_idx = self.config.nivel - 1
+        if nivel_idx < 0 or nivel_idx >= 4: nivel_idx = 0
+        setpoints_x = finales[nivel_idx, :, 0]
+        setpoints_y = finales[nivel_idx, :, 1]
+        self.setpoint_markers, = ax.plot(setpoints_x, setpoints_y, 'g*', markersize=12, 
+                                         label='Setpoints', zorder=5, alpha=0.7)
+        self.current_setpoint_marker, = ax.plot([], [], 'gX', markersize=15, 
+                                                label='Current Target', zorder=6, markeredgewidth=2)
+        
         self.track_lines = [ax.plot([], [], 'k-', lw=1.5)[0] for _ in self.lvl.visual_segments]
-        self.ball_dot, = ax.plot([], [], 'ro', markersize=8, zorder=10)
-        self.ball_trace, = ax.plot([], [], 'r-', lw=0.5, alpha=0.5)
+        self.ball_dot, = ax.plot([], [], 'ro', markersize=10, zorder=10, label='Ball')
+        self.ball_trace, = ax.plot([], [], 'r-', lw=1, alpha=0.6, label='Trajectory')
+        #ax.legend(loc='upper right', fontsize=8)
 
     def _setup_heatmap(self):
-        ax = self.fig.add_subplot(self.gs[0, 2])
-        ax.set_title("Active Rules Matrix")
-        ax.set_xlabel("Error"); ax.set_ylabel("Velocidad")
+        ax = self.fig.add_subplot(self.gs[0:1, 2:3])
+        ax.set_title("Active Rules Matrix", fontsize=12, fontweight='bold', pad=8)
+        ax.set_xlabel("Error", fontsize=10); ax.set_ylabel("Velocidad", fontsize=10)
         # Error has 9 MFs, Velocidad has 5 MFs
-        ax.set_xticks(range(9)); ax.set_xticklabels([l[:4] for l in self.fuzzy.error_labels], rotation=45, fontsize=7)
-        ax.set_yticks(range(5)); ax.set_yticklabels([l[:4] for l in self.fuzzy.velocidad_labels], fontsize=7)
+        ax.set_xticks(range(9)); ax.set_xticklabels([l[:4] for l in self.fuzzy.error_labels], rotation=45, fontsize=8)
+        ax.set_yticks(range(5)); ax.set_yticklabels([l[:4] for l in self.fuzzy.velocidad_labels], fontsize=8)
         self.heatmap_img = ax.imshow(np.zeros((5, 9)), cmap='Reds', vmin=0, vmax=1, origin='lower', aspect='auto')
+        plt.colorbar(self.heatmap_img, ax=ax, fraction=0.046, pad=0.04)
 
     def _setup_defuzz_view(self):
-        ax = self.fig.add_subplot(self.gs[1, 2])
-        ax.set_title("Defuzzification")
+        ax = self.fig.add_subplot(self.gs[1:2, 2:3])
+        ax.set_title("Defuzzification", fontsize=12, fontweight='bold', pad=8)
         ax.set_xlim(-0.5, 0.5); ax.set_ylim(0, 1.1)
         ax.grid(True, alpha=0.3)
+        ax.set_xlabel("Error", fontsize=9)
         # Get centers of output MFs
         output_centers = [self.fuzzy.inclinacion_mfs[label][1] for label in self.fuzzy.inclinacion_labels]
         for i, (label, center) in enumerate(zip(self.fuzzy.inclinacion_labels, output_centers)):
             ax.axvline(center, color='gray', linestyle=':', alpha=0.5)
-            ax.text(center, 1.02, label[:4], ha='center', fontsize=6, rotation=45)
+            ax.text(center, 1.02, label[:4], ha='center', fontsize=7, rotation=45)
         self.out_bars = ax.bar(output_centers, [0]*9, width=0.02, color='blue', alpha=0.6)
-        self.out_line = ax.axvline(0, color='red', lw=2)
+        self.defuzz_out_line = ax.axvline(0, color='red', lw=2)
         self.output_centers = output_centers
 
     def _setup_fuzz_plot(self, gs_pos, title, mf_dict, mf_labels, mf_range, color):
         ax = self.fig.add_subplot(gs_pos)
-        ax.set_title(title)
+        ax.set_title(title, fontsize=11, fontweight='bold', pad=6)
         ax.set_ylim(0, 1.1)
         ax.set_xlim(mf_range[0] * 1.2, mf_range[1] * 1.2)
+        ax.set_xlabel(title.split(':')[-1].strip(), fontsize=9)
+        ax.set_ylabel("Membership", fontsize=9)
+        ax.grid(True, alpha=0.3)
         
         # Draw static MF triangles
         x_static = np.linspace(mf_range[0] * 1.2, mf_range[1] * 1.2, 200)
@@ -502,32 +540,110 @@ class Dashboard:
         return line, dots
 
     def _setup_setpoint_plot(self):
-        ax = self.fig.add_subplot(self.gs[2, 0:2])
-        ax.set_title("Position vs Setpoint")
-        ax.set_xlabel("Time Step")
-        ax.set_ylabel("Position")
+        ax = self.fig.add_subplot(self.gs[3:4, 0:3])
+        ax.set_title("Position Tracking", fontsize=12, fontweight='bold', pad=8)
+        ax.set_xlabel("Time Step", fontsize=10)
+        ax.set_ylabel("Position (m)", fontsize=10)
         ax.grid(True, alpha=0.3)
-        self.setpoint_line, = ax.plot([], [], 'g--', lw=2, label='Setpoint', alpha=0.7)
-        self.position_line, = ax.plot([], [], 'b-', lw=1.5, label='Position')
-        self.error_line, = ax.plot([], [], 'r-', lw=1, label='Error', alpha=0.6)
-        ax.legend(loc='upper right')
+        self.setpoint_line, = ax.plot([], [], 'g--', lw=2, label='Setpoint', alpha=0.8, marker='o', markersize=3, markevery=10)
+        self.position_line, = ax.plot([], [], 'b-', lw=1.5, label='Position', alpha=0.8)
+        self.error_line, = ax.plot([], [], 'r-', lw=1.2, label='Error', alpha=0.7)
+        ax.legend(loc='best', fontsize=9)
         ax.set_xlim(0, len(self.hist['x']))
-        self.setpoint_ax = ax  # Store reference for dynamic updates
-        # Initial y-limits will be set dynamically in update_frame
+        self.setpoint_ax = ax
+
+    def _setup_velocity_plot(self):
+        ax = self.fig.add_subplot(self.gs[4:5, 0:1])
+        ax.set_title("Velocity", fontsize=11, fontweight='bold', pad=6)
+        ax.set_xlabel("Time Step", fontsize=9)
+        ax.set_ylabel("Velocity (m/s)", fontsize=9)
+        ax.grid(True, alpha=0.3)
+        self.velocity_line, = ax.plot([], [], 'm-', lw=1.5, label='Global Vx', alpha=0.8)
+        self.local_velocity_line, = ax.plot([], [], 'c--', lw=1.2, label='Local V', alpha=0.7)
+        ax.legend(loc='best', fontsize=8)
+        ax.set_xlim(0, len(self.hist['x']))
+        self.velocity_ax = ax
+
+    def _setup_control_output_plot(self):
+        ax = self.fig.add_subplot(self.gs[4:5, 1:2])
+        ax.set_title("Control Output", fontsize=11, fontweight='bold', pad=6)
+        ax.set_xlabel("Time Step", fontsize=9)
+        ax.set_ylabel("Inclinación (rad)", fontsize=9)
+        ax.grid(True, alpha=0.3)
+        self.control_output_line, = ax.plot([], [], 'orange', lw=1.5, label='Fuzzy Output', alpha=0.8)
+        ax.axhline(0, color='k', linestyle=':', alpha=0.3)
+        ax.legend(loc='best', fontsize=8)
+        ax.set_xlim(0, len(self.hist['x']))
+        self.control_output_ax = ax
+
+    def _setup_platform_angle_plot(self):
+        ax = self.fig.add_subplot(self.gs[4:5, 2:3])
+        ax.set_title("Platform Angle", fontsize=11, fontweight='bold', pad=6)
+        ax.set_xlabel("Time Step", fontsize=9)
+        ax.set_ylabel("Angle (rad)", fontsize=9)
+        ax.grid(True, alpha=0.3)
+        self.angle_line, = ax.plot([], [], 'purple', lw=1.5, label='Platform Angle', alpha=0.8)
+        self.angle_deg_line, = ax.plot([], [], 'brown', lw=1.2, linestyle='--', label='Angle (deg)', alpha=0.7)
+        ax.axhline(0, color='k', linestyle=':', alpha=0.3)
+        ax.legend(loc='best', fontsize=8)
+        ax.set_xlim(0, len(self.hist['x']))
+        self.angle_ax = ax
+
+    def _setup_phase_plot(self):
+        ax = self.fig.add_subplot(self.gs[4:5, 3:4])
+        ax.set_title("Phase Plot", fontsize=11, fontweight='bold', pad=6)
+        ax.set_xlabel("Error (m)", fontsize=9)
+        ax.set_ylabel("Velocity (m/s)", fontsize=9)
+        ax.grid(True, alpha=0.3)
+        self.phase_line, = ax.plot([], [], 'b-', lw=1, alpha=0.6, label='Trajectory')
+        self.phase_dot, = ax.plot([], [], 'ro', markersize=6, label='Current', zorder=10)
+        ax.axhline(0, color='k', linestyle=':', alpha=0.3, linewidth=0.5)
+        ax.axvline(0, color='k', linestyle=':', alpha=0.3, linewidth=0.5)
+        ax.legend(loc='best', fontsize=8)
+        self.phase_ax = ax
+
+    def _setup_state_info(self):
+        ax = self.fig.add_subplot(self.gs[1:2, 3:5])
+        ax.axis('off')
+        ax.set_title("System State", fontsize=12, fontweight='bold', pad=30)
+        self.state_text = ax.text(0.1, 0.9, '', transform=ax.transAxes, fontsize=10,
+                                  verticalalignment='top', family='monospace',
+                                  bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.6, pad=8))
 
     def _setup_fuzz_pos(self):
         self.line_p, self.dots_p = self._setup_fuzz_plot(
-            self.gs[3, 0], "Fuzz: Error", 
+            self.gs[5:6, 0:1], "Fuzzification: Error", 
             self.fuzzy.error_mfs, self.fuzzy.error_labels, 
             self.fuzzy.error_range, 'blue'
         )
 
     def _setup_fuzz_vel(self):
         self.line_v, self.dots_v = self._setup_fuzz_plot(
-            self.gs[3, 1], "Fuzz: Velocidad", 
+            self.gs[5:6, 1:2], "Fuzzification: Velocidad", 
             self.fuzzy.velocidad_mfs, self.fuzzy.velocidad_labels,
             self.fuzzy.velocidad_range, 'green'
         )
+
+    def _setup_output_mf_view(self):
+        ax = self.fig.add_subplot(self.gs[5:6, 2:3])
+        ax.set_title("Output MFs: Inclinación", fontsize=11, fontweight='bold', pad=6)
+        ax.set_ylim(0, 1.1)
+        ax.set_xlim(self.fuzzy.inclinacion_range[0] * 1.2, self.fuzzy.inclinacion_range[1] * 1.2)
+        ax.set_xlabel("Inclinación (rad)", fontsize=9)
+        ax.set_ylabel("Membership", fontsize=9)
+        ax.grid(True, alpha=0.3)
+        
+        # Draw static output MF triangles
+        x_static = np.linspace(self.fuzzy.inclinacion_range[0] * 1.2, 
+                              self.fuzzy.inclinacion_range[1] * 1.2, 200)
+        for label in self.fuzzy.inclinacion_labels:
+            abc = self.fuzzy.inclinacion_mfs[label]
+            y = [self.fuzzy._trimf(xi, abc) for xi in x_static]
+            ax.plot(x_static, y, 'k-', lw=0.5, alpha=0.5)
+            ax.fill_between(x_static, 0, y, alpha=0.05, color='orange')
+        
+        self.output_line = ax.axvline(0, color='red', lw=2, label='Output')
+        ax.legend(loc='upper right', fontsize=8)
 
     def update_frame(self, f):
         # 1. Update Track Geometry
@@ -537,7 +653,30 @@ class Dashboard:
             ln.set_data(gx, gy)
         
         self.ball_dot.set_data([self.hist['x'][f]], [self.hist['y'][f]])
-        self.ball_trace.set_data(self.hist['x'][max(0, f-50):f], self.hist['y'][max(0, f-50):f])
+        trace_len = min(200, f+1)
+        self.ball_trace.set_data(self.hist['x'][max(0, f-trace_len+1):f+1], 
+                                 self.hist['y'][max(0, f-trace_len+1):f+1])
+        
+        # Update current setpoint marker
+        if f < len(self.hist['setpoint']):
+            current_setpoint_x = self.hist['setpoint'][f]
+            # Find corresponding Y from finales
+            finales = np.zeros((4, 7, 2))
+            finales[0, :, 0] = [0, 0, 0, 0, 0, 0, -0.02554]
+            finales[0, :, 1] = [0.11429, 0.06857, 0.02286, -0.02286, -0.06857, -0.11429, -0.16035]
+            finales[1, :, 0] = [0.06211, -0.04758, 0.04969, -0.04847, 0.04406, -0.05409, -0.02554]
+            finales[1, :, 1] = [0.11223, 0.06799, 0.02154, -0.02411, -0.06961, -0.11585, -0.16035]
+            finales[2, :, 0] = [0.12394, -0.09503, 0.09924, -0.0968, 0.08803, -0.108, -0.02554]
+            finales[2, :, 1] = [0.10605, 0.06374, 0.01759, -0.02787, -0.07271, -0.12053, -0.16035]
+            finales[3, :, 0] = [0.12394, 0.14224, 0.14851, -0.14488, 0.1318, -0.108, -0.02554]
+            finales[3, :, 1] = [0.10605, 0.05771, 0.01102, -0.03412, -0.07789, -0.12053, -0.16035]
+            nivel_idx = self.config.nivel - 1
+            if nivel_idx < 0 or nivel_idx >= 4: nivel_idx = 0
+            # Find closest setpoint
+            setpoints_x = finales[nivel_idx, :, 0]
+            setpoints_y = finales[nivel_idx, :, 1]
+            closest_idx = np.argmin(np.abs(setpoints_x - current_setpoint_x))
+            self.current_setpoint_marker.set_data([setpoints_x[closest_idx]], [setpoints_y[closest_idx]])
 
         # 2. Update Setpoint Plot
         time_steps = list(range(f+1))
@@ -545,34 +684,86 @@ class Dashboard:
         self.position_line.set_data(time_steps, self.hist['x'][:f+1])
         self.error_line.set_data(time_steps, self.hist['error'][:f+1])
         
-        # Update y-axis range dynamically based on current data
+        # Update y-axis range dynamically
         if f >= 0 and len(self.hist['x']) > 0:
             all_vals = self.hist['x'][:f+1] + self.hist['setpoint'][:f+1] + self.hist['error'][:f+1]
             if all_vals:
                 y_min, y_max = min(all_vals), max(all_vals)
                 y_range = y_max - y_min
-                # Add 10% padding, but ensure minimum range
                 padding = max(0.1 * y_range, 0.05) if y_range > 0 else 0.1
                 self.setpoint_ax.set_ylim(y_min - padding, y_max + padding)
 
-        # 3. Update Debug Visuals
+        # 3. Update Velocity Plot
+        self.velocity_line.set_data(time_steps, self.hist['global_vx'][:f+1])
+        self.local_velocity_line.set_data(time_steps, self.hist['lv'][:f+1])
+        if f >= 0 and len(self.hist['global_vx']) > 0:
+            all_vel = self.hist['global_vx'][:f+1] + self.hist['lv'][:f+1]
+            if all_vel:
+                v_min, v_max = min(all_vel), max(all_vel)
+                v_range = v_max - v_min
+                padding = max(0.1 * v_range, 0.01) if v_range > 0 else 0.1
+                self.velocity_ax.set_ylim(v_min - padding, v_max + padding)
+
+        # 4. Update Control Output Plot
+        control_outputs = [d['output'] if d else 0.0 for d in self.hist['debug'][:f+1]]
+        self.control_output_line.set_data(time_steps, control_outputs)
+        if control_outputs:
+            c_min, c_max = min(control_outputs), max(control_outputs)
+            c_range = c_max - c_min
+            padding = max(0.1 * c_range, 0.01) if c_range > 0 else 0.1
+            self.control_output_ax.set_ylim(c_min - padding, c_max + padding)
+
+        # 5. Update Platform Angle Plot
+        angles = self.hist['angle'][:f+1]
+        angles_deg = [np.degrees(a) for a in angles]
+        self.angle_line.set_data(time_steps, angles)
+        self.angle_deg_line.set_data(time_steps, angles_deg)
+        if angles:
+            a_min, a_max = min(angles), max(angles)
+            a_range = a_max - a_min
+            padding = max(0.1 * a_range, 0.01) if a_range > 0 else 0.1
+            self.angle_ax.set_ylim(a_min - padding, a_max + padding)
+
+        # 6. Update Phase Plot
+        phase_trace_len = min(500, f+1)
+        phase_errors = self.hist['error'][max(0, f-phase_trace_len+1):f+1]
+        phase_vels = self.hist['global_vx'][max(0, f-phase_trace_len+1):f+1]
+        self.phase_line.set_data(phase_errors, phase_vels)
+        if f < len(self.hist['error']):
+            self.phase_dot.set_data([self.hist['error'][f]], [self.hist['global_vx'][f]])
+        if phase_errors and phase_vels:
+            self.phase_ax.set_xlim(min(phase_errors) - 0.01, max(phase_errors) + 0.01)
+            self.phase_ax.set_ylim(min(phase_vels) - 0.01, max(phase_vels) + 0.01)
+
+        # 7. Update State Info
+        current_floor = self.hist.get('current_floor', [0] * len(self.hist['x']))[f] if f < len(self.hist.get('current_floor', [])) else 0
+        state_text = f"Level: {self.config.nivel}\n"
+        state_text += f"Floor: {current_floor}\n"
+        state_text += f"Position: {self.hist['x'][f]:.4f} m\n"
+        state_text += f"Error: {self.hist['error'][f]:.4f} m\n"
+        state_text += f"Velocity: {self.hist['global_vx'][f]:.4f} m/s\n"
+        state_text += f"Angle: {np.degrees(self.hist['angle'][f]):.2f}°\n"
+        if f < len(self.hist['debug']) and self.hist['debug'][f]:
+            state_text += f"Control Out: {self.hist['debug'][f]['output']:.4f} rad"
+        self.state_text.set_text(state_text)
+
+        # 8. Update Debug Visuals
         info = self.hist['debug'][f]
         if not info: return self._get_artists() # Skip if no debug data (falling)
 
         error_val = self.hist['error'][f]
-        velocidad_val = self.hist['global_vx'][f]  # Using global X velocity as velocidad
+        velocidad_val = self.hist['global_vx'][f]
         
         # Fuzzification Lines/Dots
         self.line_p.set_xdata([error_val])
         self.line_v.set_xdata([velocidad_val])
-        # Plot membership values for all MFs
         error_mems = [info['m_error'][k] for k in self.fuzzy.error_labels]
         velocidad_mems = [info['m_velocidad'][k] for k in self.fuzzy.velocidad_labels]
         self.dots_p.set_data([error_val]*len(self.fuzzy.error_labels), error_mems)
         self.dots_v.set_data([velocidad_val]*len(self.fuzzy.velocidad_labels), velocidad_mems)
 
         # Heatmap: velocidad (rows) x error (columns)
-        grid = np.zeros((5, 9))  # 5 velocidad MFs x 9 error MFs
+        grid = np.zeros((5, 9))
         for r in info['rules']:
             velocidad_idx = self.fuzzy.velocidad_labels.index(r['velocidad_mf'])
             error_idx = self.fuzzy.error_labels.index(r['error_mf'])
@@ -586,14 +777,20 @@ class Dashboard:
             bar_h[inclinacion_idx] = max(bar_h[inclinacion_idx], r['strength'])
         
         for bar, h in zip(self.out_bars, bar_h): bar.set_height(h)
-        self.out_line.set_xdata([info['output']])
+        self.defuzz_out_line.set_xdata([info['output']])
+        self.output_line.set_xdata([info['output']])
         
         return self._get_artists()
 
     def _get_artists(self):
-        return self.track_lines + [self.ball_dot, self.ball_trace, self.setpoint_line, 
-                                   self.position_line, self.error_line, self.line_p, self.dots_p, 
-                                   self.line_v, self.dots_v, self.heatmap_img, self.out_line] + list(self.out_bars)
+        return (self.track_lines + [self.ball_dot, self.ball_trace, self.setpoint_markers, 
+                                   self.current_setpoint_marker, self.setpoint_line, 
+                                   self.position_line, self.error_line, self.velocity_line,
+                                   self.local_velocity_line, self.control_output_line,
+                                   self.angle_line, self.angle_deg_line, self.phase_line,
+                                   self.phase_dot, self.line_p, self.dots_p, 
+                                   self.line_v, self.dots_v, self.heatmap_img, self.defuzz_out_line,
+                                   self.output_line, self.state_text] + list(self.out_bars))
 
     def show(self):
         ani = FuncAnimation(self.fig, self.update_frame, frames=len(self.hist['x']), interval=20, blit=False)
@@ -635,7 +832,7 @@ def controller(piso, posX, nivel):
     
     # Convert from MATLAB 1-based to Python 0-based indexing
     nivel_idx = nivel - 1
-    piso_idx = piso - 1
+    piso_idx = piso - 2
     
     # Bounds checking
     if nivel_idx < 0 or nivel_idx >= 4:
@@ -659,7 +856,8 @@ def main():
     fuzzy = FuzzyController()
     
     # 2. Simulation Loop
-    history = {'x': [], 'y': [], 'angle': [], 'lx': [], 'lv': [], 'global_vx': [], 'debug': [], 'setpoint': [], 'error': []}
+    history = {'x': [], 'y': [], 'angle': [], 'lx': [], 'lv': [], 'global_vx': [], 
+               'debug': [], 'setpoint': [], 'error': [], 'current_floor': []}
     current_angle = 0.0
     
     # Simulation parameters for CSV export
@@ -686,7 +884,7 @@ def main():
         finales[2, :, 0] = [0.12394, -0.09503, 0.09924, -0.0968, 0.08803, -0.108, -0.02554]
         finales[3, :, 0] = [0.12394, 0.14224, 0.14851, -0.14488, 0.1318, -0.108, -0.02554]
         nivel_idx = config.nivel - 1
-        piso_idx = piso - 1
+        piso_idx = piso - 2
         if nivel_idx < 0 or nivel_idx >= 4: nivel_idx = 0
         if piso_idx < 0 or piso_idx >= 7: piso_idx = 0
         target_x = finales[nivel_idx, piso_idx, 0]
@@ -719,6 +917,7 @@ def main():
         history['setpoint'].append(target_x)
         history['error'].append(error)
         history['debug'].append(debug)
+        history['current_floor'].append(piso)
 
     # 3. Save x and y data to CSV
     csv_filename = 'simulation_data.csv'
@@ -732,7 +931,7 @@ def main():
     print(f"Data saved to {csv_filename}")
 
     # 4. Visualization
-    dashboard = Dashboard(level, fuzzy, history)
+    dashboard = Dashboard(level, fuzzy, history, config)
     dashboard.show()
 
 if __name__ == "__main__":
