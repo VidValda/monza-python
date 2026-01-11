@@ -99,6 +99,7 @@ class PhysicsBall:
         
         # State
         self.current_floor_idx = start_idx
+        self.previous_floor_idx = start_idx  # Track previous floor for collision detection
         self.state = "ROLLING"
         
         # Local coordinates (relative to track)
@@ -151,6 +152,7 @@ class PhysicsBall:
             self._transition_to_falling(slope_val, angle, d_angle_dt)
 
     def _transition_to_falling(self, slope, angle, d_angle_dt):
+        self.previous_floor_idx = self.current_floor_idx  # Remember previous floor
         self.state = "FALLING"
         
         # Convert local velocity to global velocity
@@ -172,18 +174,45 @@ class PhysicsBall:
         self.global_x += self.global_vx * dt
         self.global_y += self.global_vy * dt
         
-        # Collision Detection
-        for f_idx, floor in self.lvl.floors.items():    
-            lx_chk, ly_chk = inverse_rotate_vector(self.global_x, self.global_y, angle)
+        # Collision Detection - ONLY check floors ahead of previous floor
+        lx_chk, ly_chk = inverse_rotate_vector(self.global_x, self.global_y, angle)
+        
+        best_collision = None
+        max_target_y = float('-inf')  # Find floor with highest y (most below the ball)
+        
+        # Determine which floors to check
+        if self.previous_floor_idx >= 0 and self.previous_floor_idx in self.lvl.floors:
+            # ONLY check floors with index > previous_floor_idx (forward progression)
+            floors_to_check = [i for i in sorted(self.lvl.floors.keys()) if i > self.previous_floor_idx]
+        else:
+            # If no previous floor, check all floors
+            floors_to_check = sorted(self.lvl.floors.keys())
+        
+        for f_idx in floors_to_check:
+            floor = self.lvl.floors[f_idx]
             
             # Check X bounds
             if floor['min'] <= lx_chk <= floor['max']:
                 target_y = float(floor['func'](lx_chk))
                 
-                # Check Y collision (tunneling check simplified)
+                # Check Y collision - ball is below or at the floor
                 if ly_chk <= target_y:
-                    self._resolve_collision(lx_chk, ly_chk, target_y, floor, angle, f_idx)
-                    if self.state == "ROLLING": break
+                    # Calculate if ball is moving toward this floor
+                    slope = float(floor['slope'](lx_chk))
+                    floor_angle = np.arctan(slope) + angle
+                    nx, ny = -np.sin(floor_angle), np.cos(floor_angle)
+                    v_dot_n = self.global_vx * nx + self.global_vy * ny
+                    
+                    # Only consider collision if ball is moving toward the floor
+                    # And prefer floors that are more below the ball (higher target_y)
+                    if v_dot_n < 0 and target_y > max_target_y:
+                        max_target_y = target_y
+                        best_collision = (f_idx, floor, lx_chk, ly_chk, target_y)
+        
+        # Resolve the best collision found
+        if best_collision is not None:
+            f_idx, floor, lx_chk, ly_chk, target_y = best_collision
+            self._resolve_collision(lx_chk, ly_chk, target_y, floor, angle, f_idx)
 
     def _resolve_collision(self, lx, ly, target_y, floor, angle, f_idx):
         slope = float(floor['slope'](lx))
@@ -206,6 +235,7 @@ class PhysicsBall:
             # Stick to floor if impact is low
             if abs(v_dot_n) < 0.5:
                 self.state = "ROLLING"
+                self.previous_floor_idx = self.current_floor_idx
                 self.current_floor_idx = f_idx
                 self.local_x = lx
                 self.local_y = target_y
