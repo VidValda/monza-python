@@ -10,7 +10,7 @@ import numpy as np
 import json
 import csv
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
+from matplotlib.animation import FuncAnimation, FFMpegWriter, PillowWriter
 from scipy.interpolate import interp1d
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional
@@ -1219,6 +1219,48 @@ class Dashboard:
         )
         plt.show()
 
+    def save_video(self, filename: str = 'simulation_video.mp4', fps: int = 30, dpi: int = 100):
+        """
+        Save the animation as a video file.
+        
+        Args:
+            filename: Output video filename (default: 'simulation_video.mp4')
+            fps: Frames per second for the video (default: 30)
+            dpi: Dots per inch for video quality (default: 100)
+        """
+        print(f"Saving animation to {filename}...")
+        print(f"Total frames: {len(self.history['x'])}")
+        print(f"Video settings: {fps} fps, {dpi} dpi")
+        
+        # Create animation
+        ani = FuncAnimation(
+            self.fig, self.update_frame,
+            frames=len(self.history['x']),
+            interval=1000/fps,  # Convert fps to interval in milliseconds
+            blit=False,
+            repeat=False
+        )
+        
+        # Try to use FFMpegWriter first (better quality), fall back to PillowWriter if not available
+        try:
+            writer = FFMpegWriter(fps=fps, metadata=dict(artist='Monza Simulation'), bitrate=1800)
+            ani.save(filename, writer=writer, dpi=dpi)
+            print(f"Video saved successfully as {filename}")
+        except Exception as e:
+            print(f"FFMpegWriter failed: {e}")
+            print("Trying PillowWriter (GIF format)...")
+            try:
+                # PillowWriter creates GIF files
+                if not filename.endswith('.gif'):
+                    filename = filename.rsplit('.', 1)[0] + '.gif'
+                writer = PillowWriter(fps=fps)
+                ani.save(filename, writer=writer, dpi=dpi)
+                print(f"Animation saved as GIF: {filename}")
+            except Exception as e2:
+                print(f"Failed to save video: {e2}")
+                print("Please install ffmpeg for MP4 support: sudo apt-get install ffmpeg")
+                raise
+
 # ============================================================================
 # CONTROLLER FUNCTION
 # ============================================================================
@@ -1315,7 +1357,13 @@ def main():
 
     # 4. Visualization
     dashboard = Dashboard(level, fuzzy, history, config)
-    dashboard.show()
+    
+    # Save video
+    video_filename = 'simulation_video.mp4'
+    dashboard.save_video(video_filename, fps=30, dpi=100)
+    
+    # Optionally display the animation (comment out if you only want the video)
+    # dashboard.show()
 
 if __name__ == "__main__":
     main()
