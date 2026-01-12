@@ -463,7 +463,7 @@ class Dashboard:
     def _setup_track_view(self):
         ax = self.fig.add_subplot(self.gs[0:3, 0:2])
         ax.set_title("Simulation Track", fontsize=14, fontweight='bold', pad=10)
-        ax.set_xlim(-0.5, 0.5); ax.set_ylim(-0.5, 0.5); ax.set_aspect('equal')
+        ax.set_xlim(-0.3, 0.3); ax.set_ylim(-0.3, 0.3); ax.set_aspect('equal')
         ax.grid(True, alpha=0.3)
         ax.set_xlabel("X Position (m)", fontsize=11)
         ax.set_ylabel("Y Position (m)", fontsize=11)
