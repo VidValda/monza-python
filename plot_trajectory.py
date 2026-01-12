@@ -11,10 +11,10 @@ x = df['x'].values
 y = df['y'].values
 
 # Create figure with subplots
-fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+fig, axes = plt.subplots(1, 1, figsize=(6, 6))
 
 # Plot 1: Trajectory in x-y plane (colored by time)
-ax1 = axes[0]
+ax1 = axes
 scatter = ax1.scatter(x, y, c=time, cmap='viridis', s=10, alpha=0.6)
 ax1.plot(x, y, 'k-', alpha=0.3, linewidth=0.5)  # Connect points with line
 ax1.set_xlabel('x', fontsize=12)
@@ -28,14 +28,14 @@ plt.colorbar(scatter, ax=ax1, label='Time (s)')
 
 
 # Plot 2: Time evolution of x and y
-ax2 = axes[1]
-ax2.plot(time, x, 'b-', label='x(t)', linewidth=2)
-ax2.plot(time, y, 'r-', label='y(t)', linewidth=2)
-ax2.set_xlabel('Time (s)', fontsize=12)
-ax2.set_ylabel('Position', fontsize=12)
-ax2.set_title('Position vs Time', fontsize=14, fontweight='bold')
-ax2.grid(True, alpha=0.3)
-ax2.legend()
+#ax2 = axes[1]
+#ax2.plot(time, x, 'b-', label='x(t)', linewidth=2)
+#ax2.plot(time, y, 'r-', label='y(t)', linewidth=2)
+#ax2.set_xlabel('Time (s)', fontsize=12)
+#ax2.set_ylabel('Position', fontsize=12)
+#ax2.set_title('Position vs Time', fontsize=14, fontweight='bold')
+#ax2.grid(True, alpha=0.3)
+#ax2.legend()
 
 plt.tight_layout()
 plt.savefig('trajectory_plot.png', dpi=300, bbox_inches='tight')
