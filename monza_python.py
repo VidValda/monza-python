@@ -569,11 +569,11 @@ class FuzzyController:
         self.velocidad_labels = ['rapidaNeg', 'lentaNeg', 'cero', 'lentaPos', 'rapidaPos']
     
         self.velocidad_mfs = {
-            'rapidaNeg': [-1.593, -1.125, -0.657],  # trapinf: extends to -inf on left
-            'lentaNeg': [-1.0305, -0.5625, -0.0945],
-            'cero': [-0.468, 0, 0.468],
-            'lentaPos': [0.0945, 0.5625, 1.0305],
-            'rapidaPos': [0.657, 1.125, 1.593]      # trapinf: extends to +inf on right
+            'rapidaNeg': [-1.5, -0.5, -0.3],  # trapinf: extends to -inf on left
+            'lentaNeg': [-0.5, -0.3, 0],
+            'cero': [-0.3, 0, 0.3],
+            'lentaPos': [0, 0.3, 0.5],
+            'rapidaPos': [0.3, 0.5, 1.5]      # trapinf: extends to +inf on right
         }
         # Update velocidad_range to include all membership functions
         all_values = [val for mf in self.velocidad_mfs.values() for val in mf]
