@@ -568,12 +568,19 @@ class FuzzyController:
         # Edge membership functions use trapinf (extend to infinity)
         self.velocidad_labels = ['rapidaNeg', 'lentaNeg', 'cero', 'lentaPos', 'rapidaPos']
     
-        self.velocidad_mfs = {
+        # Base membership function values (before scaling)
+        velocidad_mfs_base = {
             'rapidaNeg': [-1.5, -0.5, -0.3],  # trapinf: extends to -inf on left
             'lentaNeg': [-0.5, -0.3, 0],
             'cero': [-0.3, 0, 0.3],
             'lentaPos': [0, 0.3, 0.5],
             'rapidaPos': [0.3, 0.5, 1.5]      # trapinf: extends to +inf on right
+        }
+        # Apply scale factor
+        VELOCIDAD_MF_SCALE = 1
+        self.velocidad_mfs = {
+            label: [v * VELOCIDAD_MF_SCALE for v in values]
+            for label, values in velocidad_mfs_base.items()
         }
         # Update velocidad_range to include all membership functions
         all_values = [val for mf in self.velocidad_mfs.values() for val in mf]
