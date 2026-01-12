@@ -32,8 +32,9 @@ titlepage=on        % own page for each title page
 \usepackage[numbers,sort&compress]{natbib}
 \bibliographystyle{IEEEtran}
 
-
-
+\usepackage{subcaption}
+\usepackage{graphicx} % Seguramente ya lo tienes
+\usepackage{float}    % Para usar la opción [H]
 
 \usepackage[table]{xcolor}
 \usepackage{colortbl}
@@ -424,7 +425,8 @@ Se han diseñado e implementado controladores para gobernar el ángulo $\theta$ 
 
 \subsection{Control por Modos Deslizantes (SMC)}
 
-El Control por Modos Deslizantes (SMC,Sliding Mode Control) es una técnica de control robusto no lineal que se originó en la Unión Soviética en la década de 1950, bajo el paradigma de los Sistemas de Estructura Variable (VSS). A diferencia de las leyes de control continuo convencionales, el SMC emplea una ley de control discontinua de alta frecuencia que altera la estructura dinámica del sistema en función del estado actual del mismo . El controlador SMC busca llevar el estado del sistema a una superficie de deslizamiento $s(t) = 0$. Se definen las variables de error $e$ (posición respecto al objetivo) y $\dot{e}$.
+El Control por Modos Deslizantes (SMC,Sliding Mode Control) es una técnica de control robusto no lineal  bajo el paradigma de los Sistemas de Estructura Variable (VSS). A diferencia de las leyes de control continuo convencionales, el SMC emplea una ley de control discontinua de alta frecuencia que altera la estructura dinámica del sistema en función del estado actual del mismo . El controlador SMC busca llevar el estado del sistema a una superficie de deslizamiento $s(t) = 0$. Se definen las variables de error $e$ (posición respecto al objetivo) y $\dot{e}$.
+\cite{shtessel2014sliding},\cite{Adaptive_slidingmode}.
 \begin{equation}
     s(t) = e(t) + \lambda \cdot \dot{e}(t)
 \end{equation}
@@ -518,7 +520,10 @@ El algoritmo sigue una lógica discreta para calcular la acción de control $u$ 
 \end{figure}
 
 \subsection{Control de Lógica Difusa (Fuzzy Logic)}
-Se implementó un controlador tipo Mamdani basado en reglas heurísticas, siguiendo la especificación del sistema de control difuso de MATLAB.
+La Lógica Difusa (Fuzzy Logic), propuesta por Lotfi Zadeh en 1965, es una extensión de la lógica booleana clásica que permite modelar la imprecisión y la incertidumbre inherentes al razonamiento humano y a los sistemas físicos complejos. A diferencia de la lógica clásica, donde un elemento pertenece o no a un conjunto (valores discretos $\{0, 1\}$), la lógica difusa contiene d el concepto de grado de pertenencia, permitiendo que un elemento pertenezca parcialmente a un conjunto con un valor en el intervalo continuo $[0, 1]$.
+
+
+Se implementó un controlador tipo Fuzzy basado en reglas heurísticas.
 
 \begin{itemize}
     \item \textbf{Entrada 1 - Error:} Error de posición $e = x_{\text{setpoint}} - x_g$ con 9 funciones de pertenencia triangulares.
@@ -562,43 +567,33 @@ Para las funciones de pertenencia en los bordes del dominio de velocidad (rapida
 \paragraph{Entrada 1: Error de Posición}
 El error de posición tiene 9 funciones de pertenencia triangulares con los siguientes parámetros:
 \begin{align}
-    \text{grandeNeg:} &\quad [-0.35, -0.29, -0.23] \\
-    \text{medioNeg:} &\quad [-0.28, -0.22, -0.16] \\
-    \text{pequeñoNeg:} &\quad [-0.21, -0.15, -0.08] \\
-    \text{muyPequeñoNeg:} &\quad [-0.10, -0.05, -0.01] \\
+    \text{LargeNeg:} &\quad [-0.35, -0.29, -0.23] \\
+    \text{MediumNeg:} &\quad [-0.28, -0.22, -0.16] \\
+    \text{SmallNeg:} &\quad [-0.21, -0.15, -0.08] \\
+    \text{XSmallPequeñoNeg:} &\quad [-0.10, -0.05, -0.01] \\
     \text{cero:} &\quad [-0.01, 0, 0.01] \\
-    \text{muyPequeñoPos:} &\quad [0.01, 0.05, 0.10] \\
-    \text{pequeñoPos:} &\quad [0.08, 0.15, 0.21] \\
-    \text{medioPos:} &\quad [0.16, 0.22, 0.28] \\
-    \text{grandePos:} &\quad [0.23, 0.29, 0.35]
+    \text{XSmallPos:} &\quad [0.01, 0.05, 0.10] \\
+    \text{SmallPos:} &\quad [0.08, 0.15, 0.21] \\
+    \text{MediumPos:} &\quad [0.16, 0.22, 0.28] \\
+    \text{LargePos:} &\quad [0.23, 0.29, 0.35]
 \end{align}
-El rango de operación del error es $[-0.35, 0.35]$ metros.
-
 \paragraph{Entrada 2: Velocidad Local}
-La velocidad local tangencial tiene 5 funciones de pertenencia. Las funciones de los bordes utilizan trapinf, mientras que las centrales son triangulares. Los valores base se escalan por un factor de $0.85$:
+La velocidad local tangencial tiene 5 funciones de pertenencia. Las funciones de los bordes utilizan trapinf, mientras que las centrales son triangulares.
 \begin{align}
-    \text{rapidaNeg:} &\quad [-10.0, -0.25, -0.2] \times 0.85 \quad \text{(trapinf izquierdo)} \\
-    \text{lentaNeg:} &\quad [-0.2, -0.1, 0] \times 0.85 \\
-    \text{cero:} &\quad [-0.3, 0, 0.3] \times 0.85 \\
-    \text{lentaPos:} &\quad [0, 0.1, 0.2] \times 0.85 \\
-    \text{rapidaPos:} &\quad [0.2, 0.25, 10.0] \times 0.85 \quad \text{(trapinf derecho)}
+    \text{FastNeg:} &\quad [-8.5, -0.2125, -0.17] \quad \text{(trapinf izquierdo)} \\
+    \text{SlowNeg:} &\quad [-0.17, -0.085, 0] \\
+    \text{cero:} &\quad [-0.255, 0, 0.255] \\
+    \text{SlowPos:} &\quad [0, 0.085, 0.17] \\
+    \text{FastPos:} &\quad [0.17, 0.2125, 8.5] \quad \text{(trapinf derecho)}
 \end{align}
-El rango efectivo de operación es aproximadamente $[-0.85, 0.85]$ m/s, extendiéndose hasta $\pm\infty$ en los bordes.
 
 \paragraph{Salida: Inclinación}
 La inclinación del tablero tiene 9 funciones de pertenencia triangulares:
-\begin{align}
-    \text{giraMuchoNeg:} &\quad [-0.4833, -0.4, -0.3167] \\
-    \text{giraMedioNeg:} &\quad [-0.3833, -0.3, -0.2167] \\
-    \text{giraPocoNeg:} &\quad [-0.2833, -0.2, -0.1167] \\
-    \text{giraMuyPocoNeg:} &\quad [-0.1833, -0.1, -0.0167] \\
-    \text{cero:} &\quad [-0.0833, 0, 0.0833] \\
-    \text{giraMuyPocoPos:} &\quad [0.0167, 0.1, 0.1833] \\
-    \text{giraPocoPos:} &\quad [0.1167, 0.2, 0.2833] \\
-    \text{giraMedioPos:} &\quad [0.2167, 0.3, 0.3833] \\
-    \text{giraMuchoPos:} &\quad [0.3167, 0.4, 0.4833]
-\end{align}
-El rango de salida es $[-0.4833, 0.4833]$ radianes, que se limita posteriormente a $\pm\theta_{\max}$.
+\begin{align} \text{LargeTurnNeg:} &\quad [-0.43497, -0.36, -0.28503] \\ \text{MediumTurnNeg:} &\quad [-0.34497, -0.27, -0.19503] \\ \text{SmallTurnNeg:} &\quad [-0.25497, -0.18, -0.10503] \\ \text{XSmallTurnNeg:} &\quad [-0.16497, -0.09, -0.01503] \\ 
+\text{cero:} &\quad [-0.07497, 0, 0.07497] \\ 
+\text{XSmallTurnPos:} &\quad [0.01503, 0.09, 0.16497] \\ 
+\text{SmallTurnPos:} &\quad [0.10503, 0.18, 0.25497] \\ 
+\text{MediumTurnPos:} &\quad [0.19503, 0.27, 0.34497] \\ \text{LargeTurnPos:} &\quad [0.28503, 0.36, 0.43497] \end{align}
 
 \subsubsection{Evaluación de Reglas y Inferencia}
 El sistema implementa 20 reglas difusas de la forma:
@@ -653,104 +648,12 @@ donde $\omega_{\max} = 3$ rad/s es la velocidad angular máxima permitida. La ac
 
 \begin{figure}[H]
     \centering
-    \begin{tikzpicture}[scale=1.0]
-        % Error membership functions (9 MFs)
-        \begin{scope}[xshift=0cm]
-            \draw[->] (-0.5,0) -- (0.5,0) node[right] {$e$ (m)};
-            \draw[->] (0,0) -- (0,1.3) node[above] {$\mu(e)$};
-            
-            % Simplified representation: show key membership functions
-            \def\gn{-0.29}
-            \def\mn{-0.22}
-            \def\pn{-0.15}
-            \def\mpn{-0.05}
-            \def\z{0.0}
-            \def\mpp{0.05}
-            \def\pp{0.15}
-            \def\mp{0.22}
-            \def\gp{0.29}
-            
-            % Draw a few representative triangles
-            \draw[thick, blue] (\gn-0.06,0) -- (\gn,1) -- (\gn+0.06,0);
-            \node[below, font=\tiny] at (\gn, 0) {gN};
-            \draw[thick, green!60!black] (\mn-0.06,0) -- (\mn,1) -- (\mn+0.06,0);
-            \node[below, font=\tiny] at (\mn, 0) {mN};
-            \draw[thick, orange] (\z-0.01,0) -- (\z,1) -- (\z+0.01,0);
-            \node[below, font=\tiny] at (\z, 0) {Z};
-            \draw[thick, purple] (\mp,1) -- (\mp+0.06,0);
-            \draw[thick, purple] (\mp-0.06,0) -- (\mp,1);
-            \node[below, font=\tiny] at (\mp, 0) {mP};
-            \draw[thick, red] (\gp-0.06,0) -- (\gp,1) -- (\gp+0.06,0);
-            \node[below, font=\tiny] at (\gp, 0) {gP};
-            
-            \node[above] at (0, 1.3) {\textbf{Error (9 MFs)}};
-        \end{scope}
-        
-        % Velocity membership functions (5 MFs with trapinf edges)
-        \begin{scope}[xshift=4cm]
-            \draw[->] (-0.5,0) -- (0.5,0) node[right] {$v_l$ (m/s)};
-            \draw[->] (0,0) -- (0,1.3) node[above] {$\mu(v)$};
-            
-            % Simplified representation
-            \def\rn{-0.2125}
-            \def\ln{-0.085}
-            \def\z{0.0}
-            \def\lp{0.085}
-            \def\rp{0.2125}
-            
-            % Left trapinf (rapidaNeg) - extends to -inf
-            \draw[thick, blue] (-0.5,1) -- (\rn,1) -- (\rn+0.0375,0);
-            \node[below, font=\tiny] at (\rn, 0) {rN};
-            
-            % Regular triangles
-            \draw[thick, green!60!black] (\ln-0.085,0) -- (\ln,1) -- (\ln+0.085,0);
-            \node[below, font=\tiny] at (\ln, 0) {lN};
-            \draw[thick, orange] (\z-0.255,0) -- (\z,1) -- (\z+0.255,0);
-            \node[below, font=\tiny] at (\z, 0) {Z};
-            \draw[thick, purple] (\lp-0.085,0) -- (\lp,1) -- (\lp+0.085,0);
-            \node[below, font=\tiny] at (\lp, 0) {lP};
-            
-            % Right trapinf (rapidaPos) - extends to +inf
-            \draw[thick, red] (\rp-0.0375,0) -- (\rp,1) -- (0.5,1);
-            \node[below, font=\tiny] at (\rp, 0) {rP};
-            
-            \node[above] at (0, 1.3) {\textbf{Velocidad (5 MFs)}};
-        \end{scope}
-        
-        % Output membership functions (9 MFs)
-        \begin{scope}[xshift=8cm]
-            \draw[->] (-0.6,0) -- (0.6,0) node[right] {$u$ (rad)};
-            \draw[->] (0,0) -- (0,1.3) node[above] {$\mu(u)$};
-            
-            % Simplified representation
-            \def\gmn{-0.4}
-            \def\gmen{-0.3}
-            \def\gpn{-0.2}
-            \def\gmpn{-0.1}
-            \def\z{0.0}
-            \def\gmpp{0.1}
-            \def\gpp{0.2}
-            \def\gmp{0.3}
-            \def\gmppos{0.4}
-            
-            % Draw a few representative triangles
-            \draw[thick, blue] (\gmn-0.0833,0) -- (\gmn,1) -- (\gmn+0.0833,0);
-            \node[below, font=\tiny] at (\gmn, 0) {gMN};
-            \draw[thick, green!60!black] (\gmen-0.0833,0) -- (\gmen,1) -- (\gmen+0.0833,0);
-            \node[below, font=\tiny] at (\gmen, 0) {gMeN};
-            \draw[thick, orange] (\z-0.0833,0) -- (\z,1) -- (\z+0.0833,0);
-            \node[below, font=\tiny] at (\z, 0) {Z};
-            \draw[thick, purple] (\gmp-0.0833,0) -- (\gmp,1) -- (\gmp+0.0833,0);
-            \node[below, font=\tiny] at (\gmp, 0) {gMP};
-            \draw[thick, red] (\gmppos-0.0833,0) -- (\gmppos,1) -- (\gmppos+0.0833,0);
-            \node[below, font=\tiny] at (\gmppos, 0) {gMP};
-            
-            \node[above] at (0, 1.3) {\textbf{Inclinación (9 MFs)}};
-        \end{scope}
-    \end{tikzpicture}
-    \caption{Representación esquemática de las funciones de pertenencia del controlador difuso. \textbf{Error:} 9 funciones triangulares (grandeNeg, medioNeg, pequeñoNeg, muyPequeñoNeg, cero, muyPequeñoPos, pequeñoPos, medioPos, grandePos). \textbf{Velocidad:} 5 funciones (rapidaNeg con trapinf izquierdo, lentaNeg, cero, lentaPos, rapidaPos con trapinf derecho). \textbf{Inclinación:} 9 funciones triangulares (giraMuchoNeg, giraMedioNeg, giraPocoNeg, giraMuyPocoNeg, cero, giraMuyPocoPos, giraPocoPos, giraMedioPos, giraMuchoPos).}
+    \includegraphics[width=0.9\textwidth]{figures/fuzzysets.png}
+
+    \caption{Representación esquemática de las funciones de pertenencia del controlador difuso.}
     \label{fig:fuzzy}
 \end{figure}
+
 
 \section{Resultados de Simulación}
 Se realizaron pruebas comparativas de los controladores en los cuatro niveles de dificultad del juego.
@@ -760,34 +663,63 @@ A continuación, se muestra la trayectoria resultante de la moneda bajo la acci�
 
 
 \subsubsection{Sliding mode}
-% PLACEHOLDER: Trayectoria XY
+
 \begin{figure}[H]
     \centering
-    % \includegraphics[width=0.8\textwidth]{ruta/a/trayectoria_final.png}
-    \fbox{\begin{minipage}{0.8\textwidth}
-        \centering
-        \vspace{1cm}
-        \textbf{[INSERTAR IMAGEN: Trayectorias XY de la moneda]}
-        \vspace{1cm}
-    \end{minipage}}
-    \caption{Trayectoria de la moneda completando el circuito bajo control automático.}
-    \label{fig:trayectoria}
+    % --- IMAGEN IZQUIERDA ---
+    % Usamos 0.45\textwidth (45% del ancho) para que quepan las dos.
+    \includegraphics[width=0.45\textwidth]{figures/Test_1_smc.png}
+    %
+    \hfill % <--- ESTE COMANDO ES CLAVE: Rellena el espacio entre ellas
+    %
+    % --- IMAGEN DERECHA ---
+    % Asegúrate de cambiar el nombre por el de tu segunda imagen
+    \includegraphics[width=0.45\textwidth]{figures/Test_2_smc.png}
+    
+    \caption{Comparación de la trayectoria de Dificultad 1 (izquierda) y Dificultad 2 (derecha).}
+    \label{fig:trayectorias_lado_a_lado}
 \end{figure}
+
+\begin{figure}[H]
+    \centering
+    % --- IMAGEN IZQUIERDA ---
+    % Usamos 0.45\textwidth (45% del ancho) para que quepan las dos.
+    \includegraphics[width=0.45\textwidth]{figures/Test_3_smc.png}
+    %
+    \hfill % <--- ESTE COMANDO ES CLAVE: Rellena el espacio entre ellas
+    %
+    % --- IMAGEN DERECHA ---
+    % Asegúrate de cambiar el nombre por el de tu segunda imagen
+    \includegraphics[width=0.45\textwidth]{figures/Test_4_smc.png}
+    
+    \caption{Comparación de la trayectoria de Dificultad 3 (izquierda) y Dificultad 4 (derecha).}
+    \label{fig:trayectorias_lado_a_lado}
+\end{figure}
+
+
 \subsubsection{Fuzzy logic}
+Con el controlador Fuzzy se logró completar los 4 niveles de dificultad tanto en el modelo de mpython y el modelo de maltab, acá se dejan los resultados.
 \begin{figure}[H]
     \centering
-    % \includegraphics[width=0.8\textwidth]{ruta/a/trayectoria_final.png}
-    \fbox{\begin{minipage}{0.8\textwidth}
-        \centering
-        \vspace{1cm}
-        \textbf{[INSERTAR IMAGEN: Trayectorias XY de la moneda]}
-        \vspace{1cm}
-    \end{minipage}}
-    \caption{Trayectoria de la moneda completando el circuito bajo control automático.}
-    \label{fig:trayectoria}
+    % Row 1
+    \includegraphics[width=0.4\textwidth]{figures/dificultad1-comp.png}
+    \hfill
+    \includegraphics[width=0.4\textwidth]{figures/dificultad2-comp.png}
+    
+    \vspace{0.5cm} % Space between rows
+    
+    % Row 2
+    \includegraphics[width=0.4\textwidth]{figures/dificultad3-comp.png}
+    \hfill
+    \includegraphics[width=0.4\textwidth]{figures/dificultad4-comp.png}
+    
+    \caption{Comparación de las trayectorias de nuestro modelo y en simulink (Dificultad 1-4).}
+    \label{fig:grid_simple}
 \end{figure}
-\subsection{Respuesta del Actuador}
-Se analizó la suavidad y el esfuerzo de control observando la evolución del ángulo $\theta$ y la velocidad angular $\dot{\theta}$.
+
+
+\subsection{Comportamiento}
+De los experimentos anteriores se obtienen las siguientes gráficas que nos permiten conocer mejor el comportamiento del sistema.
 
 
 \subsubsection{Sliding mode}
@@ -808,18 +740,39 @@ Se analizó la suavidad y el esfuerzo de control observando la evolución del á
 
 \subsubsection{Fuzzy}
 
-% PLACEHOLDER: Gráficas de Theta y Theta_dot
 \begin{figure}[H]
     \centering
-    % \includegraphics[width=0.8\textwidth]{ruta/a/control_signals.png}
-    \fbox{\begin{minipage}{0.8\textwidth}
-        \centering
-        \vspace{1cm}
-        \textbf{[INSERTAR IMAGEN: Gráficas de ángulo y velocidad angular]}
-        \vspace{1cm}
-    \end{minipage}}
-    \caption{Evolución del ángulo de inclinación y la velocidad angular durante la partida.}
-    \label{fig:actuador}
+    \includegraphics[width=0.9\textwidth]{results/platform_angle.png}
+    \caption{Evolución del ángulo de inclinación de la plataforma durante la partida.}
+    \label{fig:fuzzy_platform_angle}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{results/control_output.png}
+    \caption{Salida del controlador difuso (inclinación objetivo) durante la simulación.}
+    \label{fig:fuzzy_control_output}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{results/position_tracking.png}
+    \caption{Seguimiento de posición: setpoint, posición actual y error del sistema.}
+    \label{fig:fuzzy_position_tracking}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{results/velocity.png}
+    \caption{Evolución de la velocidad global y local de la moneda durante la simulación.}
+    \label{fig:fuzzy_velocity}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{results/phase_plot.png}
+    \caption{Diagrama de fase mostrando la trayectoria del sistema en el espacio de estados (error vs. velocidad).}
+    \label{fig:fuzzy_phase_plot}
 \end{figure}
 
 \subsection{Tiempos de Ejecución}
