@@ -66,7 +66,7 @@ class PhysicsParams:
 @dataclass
 class SimulationConfig:
     """Main simulation configuration."""
-    diff_path: str = 'dificultad2.json'
+    diff_path: str = 'dificultad1.json'
     circ_path: str = 'circulos.json'
     duration_steps: int = 2000
     max_tilt: float = 45.0    # Maximum tilt angle in degrees
@@ -577,7 +577,7 @@ class FuzzyController:
             'rapidaPos': [0.3, 0.5, 1.5]      # trapinf: extends to +inf on right
         }
         # Apply scale factor
-        VELOCIDAD_MF_SCALE = 1
+        VELOCIDAD_MF_SCALE = 1.1
         self.velocidad_mfs = {
             label: [v * VELOCIDAD_MF_SCALE for v in values]
             for label, values in velocidad_mfs_base.items()
