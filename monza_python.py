@@ -42,7 +42,7 @@ SETPOINTS = np.array([
 NUM_LEVELS = 4
 NUM_FLOORS = 7
 DEFAULT_SAMPLING_TIME = 0.033  # seconds
-DEFAULT_SIMULATION_DURATION = 8.5  # seconds
+DEFAULT_SIMULATION_DURATION = 15 # seconds
 EPSILON = 1e-9  # Small value to avoid division by zero
 MIN_VELOCITY_FOR_STICK = 0.5  # m/s threshold for ball to stick to floor
 PENETRATION_FIX_OFFSET = 0.001  # meters
@@ -66,7 +66,7 @@ class PhysicsParams:
 @dataclass
 class SimulationConfig:
     """Main simulation configuration."""
-    diff_path: str = 'dificultad2.json'
+    diff_path: str = 'dificultad3.json'
     circ_path: str = 'circulos.json'
     duration_steps: int = 2000
     max_tilt: float = 45.0    # Maximum tilt angle in degrees
@@ -550,15 +550,15 @@ class FuzzyController:
         self.error_labels = ['grandeNeg', 'medioNeg', 'pequeñoNeg', 'muyPequeñoNeg', 'cero',
                              'muyPequeñoPos', 'pequeñoPos', 'medioPos', 'grandePos']
         self.error_mfs = {
-            'grandeNeg': [-0.278, -0.23, -0.182],
-            'medioNeg': [-0.22, -0.173, -0.125],
-            'pequeñoNeg': [-0.163, -0.115, -0.06],
-            'muyPequeñoNeg': [-0.08, -0.04, -0.005],
-            'cero': [-0.005, 0, 0.005],
-            'muyPequeñoPos': [0.005, 0.04, 0.08],
-            'pequeñoPos': [0.06, 0.115, 0.163],
-            'medioPos': [0.125, 0.173, 0.22],
-            'grandePos': [0.182, 0.23, 0.278]
+            'grandeNeg': [-0.35, -0.29, -0.23],
+            'medioNeg': [-0.28, -0.22, -0.16],
+            'pequeñoNeg': [-0.21, -0.15, -0.08],
+            'muyPequeñoNeg': [-0.10, -0.05, -0.01],
+            'cero': [-0.01, 0, 0.01],
+            'muyPequeñoPos': [0.01, 0.05, 0.10],
+            'pequeñoPos': [0.08, 0.15, 0.21],
+            'medioPos': [0.16, 0.22, 0.28],
+            'grandePos': [0.23, 0.29, 0.35]
         }
         # Update error_range to include all membership functions
         all_values = [val for mf in self.error_mfs.values() for val in mf]
@@ -570,14 +570,14 @@ class FuzzyController:
     
         # Base membership function values (before scaling)
         velocidad_mfs_base = {
-            'rapidaNeg': [-1.5, -0.5, -0.3],  # trapinf: extends to -inf on left
-            'lentaNeg': [-0.5, -0.3, 0],
+            'rapidaNeg': [-10.0, -0.25, -0.2],  # trapinf: extends to -inf on left
+            'lentaNeg': [-0.2, -0.1, 0],
             'cero': [-0.3, 0, 0.3],
-            'lentaPos': [0, 0.3, 0.5],
-            'rapidaPos': [0.3, 0.5, 1.5]      # trapinf: extends to +inf on right
+            'lentaPos': [0, 0.1, 0.2],
+            'rapidaPos': [0.2, 0.25, 10.0]      # trapinf: extends to +inf on right
         }
         # Apply scale factor
-        VELOCIDAD_MF_SCALE = 1
+        VELOCIDAD_MF_SCALE = 0.5
         self.velocidad_mfs = {
             label: [v * VELOCIDAD_MF_SCALE for v in values]
             for label, values in velocidad_mfs_base.items()
@@ -589,8 +589,9 @@ class FuzzyController:
         # Output: inclinacion - 9 membership functions
         self.inclinacion_labels = ['giraMuchoNeg', 'giraMedioNeg', 'giraPocoNeg', 'giraMuyPocoNeg', 'cero',
                                    'giraMuyPocoPos', 'giraPocoPos', 'giraMedioPos', 'giraMuchoPos']
-        self.inclinacion_range = [-0.4, 0.4]
-        self.inclinacion_mfs = {
+        
+        INCLINACION_MF_SCALE = 1
+        inclinacion_mfs_base = {
             'giraMuchoNeg': [-0.483333333333333, -0.4, -0.316666666666667],
             'giraMedioNeg': [-0.383333333333333, -0.3, -0.216666666666667],
             'giraPocoNeg': [-0.283333333333333, -0.2, -0.116666666666667],
@@ -601,6 +602,13 @@ class FuzzyController:
             'giraMedioPos': [0.216666666666667, 0.3, 0.383333333333333],
             'giraMuchoPos': [0.316666666666667, 0.4, 0.483333333333333]
         }
+        self.inclinacion_mfs = {
+            label: [v * INCLINACION_MF_SCALE for v in values]
+            for label, values in inclinacion_mfs_base.items()
+        }
+        
+        all_values = [val for mf in self.inclinacion_mfs.values() for val in mf]
+        self.inclinacion_range = [min(all_values), max(all_values)]
         
         # Rules: format is (error_mf_idx, velocidad_mf_idx, inclinacion_mf_idx)
         # MATLAB uses 1-based indexing, we convert to 0-based
