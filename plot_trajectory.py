@@ -11,7 +11,7 @@ x = df['x'].values
 y = df['y'].values
 
 # Create figure with subplots
-fig, axes = plt.subplots(1, 1, figsize=(6, 6))
+fig, axes = plt.subplots(1, 1, figsize=(12, 12))
 
 # Plot 1: Trajectory in x-y plane (colored by time)
 ax1 = axes
@@ -38,8 +38,10 @@ plt.colorbar(scatter, ax=ax1, label='Time (s)')
 #ax2.legend()
 
 plt.tight_layout()
-plt.savefig('trajectory_plot.png', dpi=300, bbox_inches='tight')
-print(f"Plot saved as 'trajectory_plot.png'")
+import os
+os.makedirs('results', exist_ok=True)
+plt.savefig('results/trajectory_plot.png', dpi=300, bbox_inches='tight')
+print(f"Plot saved as 'results/trajectory_plot.png'")
 print(f"Total simulation time: {time[-1]:.2f} s")
 print(f"Number of data points: {len(time)}")
 plt.show()

@@ -10,7 +10,6 @@ headings=normal,    % size of headings
 titlepage=on        % own page for each title page
 ]{article}
 % **************************************************
-% THESIS details
 % **************************************************
 \newcommand{\University}{\protect{Universidad Polit\'ecnica de Madrid}}
 \newcommand{\UNIVERSITY}{\protect{UNIVERSIDAD POLIT\'ECNICA DE MADRID}}
@@ -72,20 +71,22 @@ titlepage=on        % own page for each title page
 \pagestyle{fancy}
 
 \section{Introducción}
-El objetivo del proyecto es automatizar el juego de la recreativa Monza, un sistema dinámico altamente no lineal. El juego consiste en guiar una moneda a través de múltiples niveles de rieles con forma parabólica rotando el tablero completo mediante un actuador angular $\theta$.
+El objetivo del proyecto de la asignatura de sistemas no lineales  es automatizar el juego de la recreativa Monza, un sistema dinámico altamente no lineal.Se considero para el presente trabajo poder trabajar con las plataformas de Python y Matlab. El objetivo del juego consiste en controlar la trayectoria de una moneda que se introduce en el carril superior, guiándola a través de los distintos niveles hasta alcanzar el carril inferior y depositarla en una apertura de salida específica. Debido a su topología, cada carril está delimitado por dos extremos críticos: uno de ellos permite la transición de la moneda hacia el nivel inmediatamente inferior (manteniendo la continuidad del sistema), mientras que el extremo opuesto provoca la expulsión de la moneda hacia el exterior, lo que constituye la condición de fallo del juego.
+
+% PLACEHOLDER: Imagen de la máquina real o esquema general
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/Monza1.png}
+    \caption{Estructura y Niveles del Juego del Monza.}
+    \label{fig:niveles}
+\end{figure}
 
 
 
 % PLACEHOLDER: Imagen de la máquina real o esquema general
 \begin{figure}[H]
     \centering
-    % \includegraphics[width=0.6\textwidth]{ruta/a/imagen_maquina_real.png}
-    \fbox{\begin{minipage}{0.6\textwidth}
-        \centering
-        \vspace{1cm}
-        \textbf{[INSERTAR IMAGEN: Foto de la recreativa Monza]}
-        \vspace{1cm}
-    \end{minipage}}
+    \includegraphics[width=0.6\textwidth]{figures/simulation.png}
     \caption{Niveles de dificultad de la recreativa Monza y disposición de los rieles.}
     \label{fig:niveles}
 \end{figure}
@@ -111,35 +112,65 @@ donde $\nabla$ representa el operador gradiente discreto. El ángulo de inclinac
 
 \begin{figure}[H]
     \centering
-    \begin{tikzpicture}[scale=2.5]
-        % Draw parabola y = -0.54*x^2 + 0.2
-        \draw[thick, blue] plot[smooth, domain=-0.6:0.6, samples=100] (\x, {-0.54*\x*\x + 0.2});
+    \begin{tikzpicture}[
+        scale=5,
+        >=Stealth, % Better looking arrowheads
+        every node/.style={font=\small} % Consistent font size
+    ]
+        % --- 1. Definitions ---
+        \def\xval{0.3} % The x-coordinate of the point
+        \def\yval{-0.54*\xval*\xval + 0.2} % The function f(x)
+        \def\slope{-1.08*\xval} % The derivative f'(x)
         
-        % Draw coordinate axes
-        \draw[->] (-0.7,0) -- (0.7,0) node[right] {$x_l$};
-        \draw[->] (0,-0.1) -- (0,0.5) node[above] {$y_l$};
+        % --- 2. Axes ---
+        \draw[->] (-0.6,0) -- (0.65,0) node[right] {$x_l$};
+        \draw[->] (0,-0.1) -- (0,0.5) node[left] {$y_l$};
+
+        % --- 3. Parabola Plot ---
+        \draw[thick, blue, domain=-0.55:0.55, samples=200] 
+            plot (\x, {-0.54*\x*\x + 0.2});
+
+        % --- 4. The Point (Moneda) ---
+        \coordinate (P) at (\xval, \yval);
+        \fill[red] (P) circle (1pt);
+        % Use a pin label to avoid overlap with the curve/tangent
+        \node[pin={100:Moneda}, inner sep=1pt] at (P) {};
+
+        % --- 5. Tangent Line ---
+        % Calculate points for the tangent segment using the slope
+        % Tangent vector is (1, slope). We go backwards and forwards from P.
+        \draw[green!60!black, thick] 
+            ($(P) - 0.25*(1, \slope)$) -- ($(P) + 0.25*(1, \slope)$)
+            node[right, text=green!40!black] {Tangente};
+
+        % --- 6. Angle Alpha ---
+        % Define a horizontal point and a point on the tangent for the angle
+        \coordinate (H) at ($(P) + (0.3, 0)$); % Horizontal right
+        \coordinate (T) at ($(P) + (0.3, 0.3*\slope)$); % Point on tangent
         
-        % Mark a point on the parabola
-        \coordinate (P) at (0.3, {-0.54*0.3*0.3 + 0.2});
-        \fill[red] (P) circle (1.5pt) node[above right] {Moneda};
+        % Draw the horizontal helper line (dashed for clarity)
+        \draw[orange, dashed] (P) -- (H);
         
-        % Draw tangent line at point P
-        \draw[green!60!black, thick] ($(P) + (-0.3, {-0.54*2*0.3*(-0.3)})$) -- 
-                                     ($(P) + (0.3, {-0.54*2*0.3*0.3})$) 
-                                     node[midway, above, sloped] {Tangente};
+        % Draw the angle arc
+        \pic[
+            draw=orange, 
+            thick,
+            "$\alpha$", 
+            angle radius=0.6cm, 
+            angle eccentricity=1.2
+        ] {angle = T--P--H};
+
+        % --- 7. Labels & Dimensions ---
         
-        % Draw angle alpha
-        \coordinate (P1) at ($(P) + (0.2, 0)$);
-        \coordinate (P2) at ($(P) + (0.2, {-0.54*2*0.3*0.2})$);
-        \draw[orange, thick] (P) -- (P1);
-        \draw[orange, thick] (P) -- (P2) node[midway, right] {$\alpha$};
-        \pic[draw=orange, angle radius=0.3cm, angle eccentricity=1.3] {angle={P1--P--P2}};
+        % Slope equation (Moved to top right to avoid axis overlap)
+        \node[align=left, fill=white, inner sep=2pt, text=black!80] at (0.35, 0.4) {
+            $\text{slope} = \frac{dy}{dx} = -1.08x$
+        };
         
-        % Label slope
-        \node[below] at (0, -0.05) {$\text{slope} = \frac{dy}{dx} = -1.08x$};
-        
-        % Draw vertical offset indicator
-        \draw[dashed, gray] (0,0) -- (0,0.2) node[midway, left] {$C$};
+        % C parameter (Vertical offset) - Drawn as a dimension line
+        \draw[dashed, gray] (0, 0.2) -- (-0.1, 0.2); % Projection to left
+        \draw[|<->|, gray] (-0.08, 0) -- (-0.08, 0.2) node[midway, left] {$C$};
+
     \end{tikzpicture}
     \caption{Parámetros geométricos de las parábolas que conforman los rieles.}
     \label{fig:geometria}
@@ -226,49 +257,74 @@ donde $f(x)$ es la función que describe la geometría del riel (interpolación 
 
 \begin{figure}[H]
     \centering
-    \begin{tikzpicture}[scale=2.2, >=Stealth]
-        % Draw track segment
-        \draw[thick, blue] plot[smooth, domain=-0.4:0.4, samples=50] 
-            (\x, {-0.54*\x*\x + 0.15});
+    \begin{tikzpicture}[
+        scale=7,
+        >=Stealth, % Improved arrowheads
+        every node/.style={font=\small}
+    ]
+        % --- 1. Parameters ---
+        \def\a{-0.54} % Curvature
+        \def\c{0.15}  % Vertical offset
+        \def\xpos{0.25} % Position of the ball (moved slightly for better visibility)
         
-        % Ball position
-        \coordinate (ball) at (0.2, {-0.54*0.2*0.2 + 0.15});
-        \fill[red] (ball) circle (2.5pt);
+        % Calculate y position and slope angle explicitly
+        \pgfmathsetmacro{\ypos}{\a*\xpos*\xpos + \c}
+        \pgfmathsetmacro{\slope}{2*\a*\xpos}
+        \pgfmathsetmacro{\angleval}{atan(\slope)} % The angle of the tangent
+
+        % --- 2. Coordinate System Axes (Background) ---
+        \draw[->, gray!50, dashed] (-0.5, 0) -- (0.5, 0) node[right, black] {$x_l$};
+        \draw[->, gray!50, dashed] (0, -0.05) -- (0, 0.4) node[above, black] {$y_l$};
+
+        % --- 3. The Track ---
+        \draw[thick, blue, domain=-0.45:0.45, samples=100] 
+            plot (\x, {\a*\x*\x + \c});
+
+        % --- 4. The Ball ---
+        \coordinate (P) at (\xpos, \ypos);
+        % Draw ball with slight transparency to see origin if needed, or solid
+        \fill[red!20] (P) circle (1pt); 
+        \draw[red!80] (P) circle (1pt);
+
+        % --- 5. Helper Lines (Tangent & Normal Axis) ---
+        % These help show why the vectors point where they do
+        \begin{scope}[shift={(P)}, rotate=\angleval]
+            \draw[gray, dotted] (-0.4, 0) -- (0.4, 0); % Tangent line
+            \draw[gray, dotted] (0, -0.1) -- (0, 0.3); % Normal line
+        \end{scope}
+
+        % --- 6. Forces ---
         
-        % Calculate slope at ball position
-        \def\slope{-0.54*2*0.2}
-        \def\angle{atan(\slope)}
+        % Weight (mg) - Always straight down
+        \draw[->, thick, red!80!black] (P) -- ($(P) + (0, -0.25)$) 
+            node[right] {$mg$};
+
+        % Normal Force (N) - Perpendicular to slope (90 degrees from tangent)
+        \draw[->, thick, green!50!black] (P) -- ($(P) + ({0.25*cos(\angleval+90)}, {0.25*sin(\angleval+90)})$) 
+            node[above right] {$\mathbf{N}$};
+
+        % Friction (Ff) - Opposite to velocity (assuming moving right, friction points left-up)
+        % Note: If x > 0 and moving away, slope is negative. 
+        % Friction acts along the tangent line.
+        \draw[->, thick, orange!90!black] (P) -- ($(P) + ({-0.25*cos(\angleval)}, {-0.25*sin(\angleval)})$) 
+            node[midway, above, sloped, text=orange!90!black] {$F_f = \mu_v v$};
+
+        % --- 7. Angles ---
+        % Define horizontal and tangent points for angle drawing
+        \coordinate (H) at ($(P) + (0.3, 0)$); % Horizontal right
+        \coordinate (T) at ($(P) + ({0.3*cos(\angleval)}, {0.3*sin(\angleval)})$); % Along tangent
         
-        % Draw forces
-        % Weight (mg) - vertical downward
-        \draw[->, thick, red] (ball) -- ($(ball) + (0, -0.25)$) 
-            node[midway, right] {$mg$};
+        \draw[dashed, gray] (P) -- (H); % Horizontal ref
         
-        % Normal force - perpendicular to track
-        \draw[->, thick, green!60!black] (ball) -- 
-            ($(ball) + ({0.2*cos(\angle + 90)}, {0.2*sin(\angle + 90)})$) 
-            node[midway, above left] {$\mathbf{N}$};
-        
-        % Friction force - along track opposite to velocity
-        \draw[->, thick, orange] (ball) -- 
-            ($(ball) + ({-0.15*cos(\angle)}, {-0.15*sin(\angle)})$) 
-            node[midway, below] {$F_f = \mu_v v$};
-        
-        % Draw angle indicators
-        \coordinate (ball_h) at ($(ball) + (0.3, 0)$);
-        \coordinate (ball_slope) at ($(ball) + ({0.3*cos(\angle)}, {0.3*sin(\angle)})$);
-        \draw[dashed, gray] (ball) -- (ball_h);
-        \draw[gray] (ball) -- (ball_slope) 
-            node[midway, above right] {$\alpha + \theta$};
-        \pic[draw=gray, angle radius=0.25cm] 
-            {angle={ball_h--ball--ball_slope}};
-        
-        % Coordinate system
-        \draw[->, dashed, thin] (-0.5, 0.1) -- (0.5, 0.1) node[right] {$x_l$};
-        \draw[->, dashed, thin] (-0.5, 0.1) -- (-0.5, 0.4) node[above] {$y_l$};
-        
-        % Label
-        \node[below] at (0, -0.1) {Sistema de referencia local};
+        % Draw angle arc
+        \pic[
+            draw=black!70, 
+            <->, 
+            angle radius=1.5cm, 
+            "$\alpha + \theta$", 
+            angle eccentricity=1.4
+        ] {angle = T--P--H};
+
     \end{tikzpicture}
     \caption{Diagrama de cuerpo libre de la moneda sobre el riel parabólico.}
     \label{fig:fuerzas}
@@ -345,8 +401,6 @@ Los parámetros físicos del modelo han sido ajustados experimentalmente para co
         Paso temporal interno & $\delta t = \Delta t/n_{\text{sub}}$ & 0.0033 s \\
         Ángulo máximo de inclinación & $\theta_{\max}$ & 45$^\circ$ (0.785 rad) \\
         Velocidad angular máxima & $\omega_{\max}$ & 8.0 rad/s \\
-        Setpoint de posición & $x_{\text{sp}}$ & 0.0 m \\
-        Duración de simulación & $T$ & 2.0 s \\
         \bottomrule
     \end{tabular}
 \end{table}
@@ -355,19 +409,22 @@ Los parámetros físicos fundamentales son la gravedad $g = 9.81$ m/s$^2$, el co
 
 Para el control del sistema, se establece un límite máximo de inclinación del tablero de $\theta_{\max} = 45^\circ$ y una velocidad angular máxima de $\omega_{\max} = 8.0$ rad/s para evitar movimientos bruscos. El setpoint de posición se fija en $x_{\text{sp}} = 0.0$ m, correspondiente al centro del tablero.
 
+Para evaluar el comportamiento de nuestro modelo, se hizo un registro de la trayectoria que traza bajo el estado inicial a un ángulo de 0.12 rad, figura \ref{fig:trayectoriatest}. Se comparó ambos datos y muestran un comportamiento similar tanto en el estado de deslizamiento del carril y el estado de caída, al igual que en la recepción. 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.6\textwidth]{figures/comparacion.png}
     
     \caption{Comparación de trayectorias entre modelo de simulink y modelo propio desde el punto inicial con un ángulo de -0.12 rad.}
-    \label{fig:trayectoria}
+    \label{fig:trayectoriatest}
 \end{figure}
+
 
 \section{Estrategias de Control Implementadas}
 Se han diseñado e implementado controladores para gobernar el ángulo $\theta$ del tablero y asegurar que la moneda complete el recorrido.
 
 \subsection{Control por Modos Deslizantes (SMC)}
-El controlador SMC busca llevar el estado del sistema a una superficie de deslizamiento $s(t) = 0$. Se definen las variables de error $e$ (posición respecto al objetivo) y $\dot{e}$.
+
+El Control por Modos Deslizantes (SMC,Sliding Mode Control) es una técnica de control robusto no lineal que se originó en la Unión Soviética en la década de 1950, bajo el paradigma de los Sistemas de Estructura Variable (VSS). A diferencia de las leyes de control continuo convencionales, el SMC emplea una ley de control discontinua de alta frecuencia que altera la estructura dinámica del sistema en función del estado actual del mismo . El controlador SMC busca llevar el estado del sistema a una superficie de deslizamiento $s(t) = 0$. Se definen las variables de error $e$ (posición respecto al objetivo) y $\dot{e}$.
 \begin{equation}
     s(t) = e(t) + \lambda \cdot \dot{e}(t)
 \end{equation}
@@ -375,12 +432,52 @@ La ley de control aplicada es del tipo conmutada:
 \begin{equation}
     u = -k \cdot \text{sign}(s(t))
 \end{equation}
+El algoritmo sigue una lógica discreta para calcular la acción de control $u$ en cada paso de tiempo $t$. Las ecuaciones que rigen el sistema son:
+
+\textbf{Cálculo del Error ($e$):} Diferencia entre la posición objetivo y la actual.
+\begin{equation}
+    e(t) = x_{\text{target}} - x_{\text{coin}}
+\end{equation}
+
+\textbf{Derivada del Error ($\dot{e}$):} Aproximación discreta del cambio del error.
+\begin{equation}
+    \dot{e}(t) \approx e(t) - e(t-1)
+\end{equation}
+
+\textbf{Superficie de Deslizamiento ($s$):} Combinación lineal del error y su derivada.
+\begin{equation}
+    s(t) = e(t) + \lambda \cdot \dot{e}(t)
+\end{equation}
+
+
+\begin{table}[h]
+    \centering
+    \caption{Definición de Perfiles de Control para el Controlador SMC}
+    \label{tab:perfiles_control_smc}
+    \renewcommand{\arraystretch}{1.4} % Ajusta el espaciado vertical
+    \begin{tabular}{@{}l c c p{6.5cm}@{}}
+    \toprule
+    \textbf{Perfil de Control} & \textbf{$\lambda$} & \textbf{$k$} & \textbf{Caracterización Dinámica} \\ \midrule
+    
+    \textbf{Conservador} & 100 & 0.0020 & 
+    \textit{Baja Ganancia.} Prioriza la estabilidad y la suavidad del actuador. El tiempo de establecimiento es alto, pero elimina el riesgo de oscilaciones. \\ 
+    
+    \textbf{Nominal} & 100 & 0.0040 & 
+    \textit{Balanceado.} Punto de operación estándar. Ofrece un compromiso óptimo entre velocidad de respuesta y consumo de control. \\ 
+    
+    \textbf{Respuesta Rápida} & 110 & 0.0095 & 
+    \textit{Alta Ganancia.} Maximiza la velocidad de convergencia ($\dot{e}$). Adecuado para perturbaciones rápidas, aunque susceptible al \textit{chattering}. \\ 
+    
+    \textbf{Alta Precisión} & 140 & 0.0095 & 
+    \textit{Control Robusto.} Combina alta ganancia con un fuerte término de amortiguamiento ($\lambda$). Minimiza el error de estado estacionario en trayectorias complejas. \\ \bottomrule
+    \end{tabular}
+\end{table}
 
 
 
 \begin{figure}[H]
     \centering
-    \begin{tikzpicture}[scale=1.8, >=Stealth]
+    \begin{tikzpicture}[scale=1, >=Stealth]
         % Draw axes
         \draw[->] (-2.5,0) -- (2.5,0) node[right] {$e$};
         \draw[->] (0,-2.5) -- (0,2.5) node[above] {$\dot{e}$};
@@ -421,51 +518,133 @@ La ley de control aplicada es del tipo conmutada:
 \end{figure}
 
 \subsection{Control de Lógica Difusa (Fuzzy Logic)}
-Se implementó un controlador tipo Mamdani basado en reglas heurísticas.
+Se implementó un controlador tipo Mamdani basado en reglas heurísticas, siguiendo la especificación del sistema de control difuso de MATLAB.
+
 \begin{itemize}
-    \item \textbf{Entradas:} Error de posición $e = x_{\text{setpoint}} - x_g$ y Velocidad global $v_{x,g}$ de la moneda.
-    \item \textbf{Salida:} Ángulo objetivo $\theta_{\text{target}}$ del tablero.
-    \item \textbf{Funciones de Pertenencia:} Triangulares para cinco conjuntos: NB (Negative Big), NS (Negative Small), Z (Zero), PS (Positive Small), PB (Positive Big).
+    \item \textbf{Entrada 1 - Error:} Error de posición $e = x_{\text{setpoint}} - x_g$ con 9 funciones de pertenencia triangulares.
+    \item \textbf{Entrada 2 - Velocidad:} Velocidad local tangencial $v_l$ de la moneda con 5 funciones de pertenencia (triangulares y trapezoidales infinitas en los bordes).
+    \item \textbf{Salida - Inclinación:} Ángulo objetivo $\theta_{\text{target}}$ del tablero con 9 funciones de pertenencia triangulares.
+    \item \textbf{Total de Reglas:} 20 reglas difusas que relacionan las entradas con la salida.
 \end{itemize}
 
-\subsubsection{Funciones de Pertenencia Triangulares}
-La función de pertenencia triangular se define como:
-\begin{equation}
-    \mu(x; a, b, c) = \max\left(0, \min\left(\frac{x-a}{b-a}, \frac{c-x}{c-b}\right)\right)
-\end{equation}
-donde $a$, $b$ y $c$ son los vértices izquierdo, central y derecho del triángulo, respectivamente.
+\subsubsection{Funciones de Pertenencia}
 
-Los centros de los conjuntos difusos para las entradas son:
+\paragraph{Función Triangular (trimf)}
+Para la mayoría de las funciones de pertenencia se utiliza la función triangular, definida como:
+\begin{equation}
+    \mu(x; a, b, c) = \begin{cases}
+        0 & \text{si } x \leq a \text{ o } x \geq c \\
+        \frac{x-a}{b-a} & \text{si } a < x < b \\
+        \frac{c-x}{c-b} & \text{si } b \leq x < c
+    \end{cases}
+\end{equation}
+donde $a$, $b$ y $c$ son los vértices izquierdo, central (pico) y derecho del triángulo, respectivamente.
+
+\paragraph{Función Trapezoidal Infinita (trapinf)}
+Para las funciones de pertenencia en los bordes del dominio de velocidad (rapidaNeg y rapidaPos), se utiliza una función trapezoidal que se extiende hasta infinito:
+\begin{equation}
+    \mu_{\text{trapinf}}(x; a, b, c, \text{izquierda}) = \begin{cases}
+        1 & \text{si } x \leq b \text{ (borde izquierdo)} \\
+        \frac{c-x}{c-b} & \text{si } b < x < c \\
+        0 & \text{si } x \geq c
+    \end{cases}
+\end{equation}
+\begin{equation}
+    \mu_{\text{trapinf}}(x; a, b, c, \text{derecha}) = \begin{cases}
+        0 & \text{si } x \leq a \\
+        \frac{x-a}{b-a} & \text{si } a < x < b \\
+        1 & \text{si } x \geq b \text{ (borde derecho)}
+    \end{cases}
+\end{equation}
+
+\subsubsection{Especificación de las Funciones de Pertenencia}
+
+\paragraph{Entrada 1: Error de Posición}
+El error de posición tiene 9 funciones de pertenencia triangulares con los siguientes parámetros:
 \begin{align}
-    \mathcal{E} &= \{-0.5, -0.25, 0.0, 0.25, 0.5\} \quad \text{(Error)} \\
-    \mathcal{V} &= \{-1.0, -0.75, 0.0, 0.75, 1.0\} \quad \text{(Velocidad)} \\
-    \mathcal{U} &= \{-1, -0.75, 0.0, 0.75, 1\} \quad \text{(Salida, normalizada)}
+    \text{grandeNeg:} &\quad [-0.35, -0.29, -0.23] \\
+    \text{medioNeg:} &\quad [-0.28, -0.22, -0.16] \\
+    \text{pequeñoNeg:} &\quad [-0.21, -0.15, -0.08] \\
+    \text{muyPequeñoNeg:} &\quad [-0.10, -0.05, -0.01] \\
+    \text{cero:} &\quad [-0.01, 0, 0.01] \\
+    \text{muyPequeñoPos:} &\quad [0.01, 0.05, 0.10] \\
+    \text{pequeñoPos:} &\quad [0.08, 0.15, 0.21] \\
+    \text{medioPos:} &\quad [0.16, 0.22, 0.28] \\
+    \text{grandePos:} &\quad [0.23, 0.29, 0.35]
 \end{align}
+El rango de operación del error es $[-0.35, 0.35]$ metros.
 
-\subsubsection{Evaluación de Reglas y Defuzzificación}
-Para cada regla $R_i: \text{IF } e \text{ is } E_i \text{ AND } v \text{ is } V_i \text{ THEN } u \text{ is } U_i$, la fuerza de activación se calcula mediante el operador mínimo:
+\paragraph{Entrada 2: Velocidad Local}
+La velocidad local tangencial tiene 5 funciones de pertenencia. Las funciones de los bordes utilizan trapinf, mientras que las centrales son triangulares. Los valores base se escalan por un factor de $0.85$:
+\begin{align}
+    \text{rapidaNeg:} &\quad [-10.0, -0.25, -0.2] \times 0.85 \quad \text{(trapinf izquierdo)} \\
+    \text{lentaNeg:} &\quad [-0.2, -0.1, 0] \times 0.85 \\
+    \text{cero:} &\quad [-0.3, 0, 0.3] \times 0.85 \\
+    \text{lentaPos:} &\quad [0, 0.1, 0.2] \times 0.85 \\
+    \text{rapidaPos:} &\quad [0.2, 0.25, 10.0] \times 0.85 \quad \text{(trapinf derecho)}
+\end{align}
+El rango efectivo de operación es aproximadamente $[-0.85, 0.85]$ m/s, extendiéndose hasta $\pm\infty$ en los bordes.
+
+\paragraph{Salida: Inclinación}
+La inclinación del tablero tiene 9 funciones de pertenencia triangulares:
+\begin{align}
+    \text{giraMuchoNeg:} &\quad [-0.4833, -0.4, -0.3167] \\
+    \text{giraMedioNeg:} &\quad [-0.3833, -0.3, -0.2167] \\
+    \text{giraPocoNeg:} &\quad [-0.2833, -0.2, -0.1167] \\
+    \text{giraMuyPocoNeg:} &\quad [-0.1833, -0.1, -0.0167] \\
+    \text{cero:} &\quad [-0.0833, 0, 0.0833] \\
+    \text{giraMuyPocoPos:} &\quad [0.0167, 0.1, 0.1833] \\
+    \text{giraPocoPos:} &\quad [0.1167, 0.2, 0.2833] \\
+    \text{giraMedioPos:} &\quad [0.2167, 0.3, 0.3833] \\
+    \text{giraMuchoPos:} &\quad [0.3167, 0.4, 0.4833]
+\end{align}
+El rango de salida es $[-0.4833, 0.4833]$ radianes, que se limita posteriormente a $\pm\theta_{\max}$.
+
+\subsubsection{Evaluación de Reglas y Inferencia}
+El sistema implementa 20 reglas difusas de la forma:
 \begin{equation}
-    w_i = \min(\mu_E(e), \mu_V(v))
+    R_i: \text{IF } e \text{ is } E_i \text{ AND } v_l \text{ is } V_i \text{ THEN } u \text{ is } U_i
 \end{equation}
 
-La salida defuzzificada se obtiene mediante el método del centroide (promedio ponderado):
+Para cada regla, la fuerza de activación se calcula mediante el operador mínimo (AND):
 \begin{equation}
-    u = \frac{\sum_{i=1}^{N} w_i \cdot c_i}{\sum_{i=1}^{N} w_i}
+    w_i = \min(\mu_{E_i}(e), \mu_{V_i}(v_l))
 \end{equation}
-donde $c_i$ es el centro del conjunto difuso de salida $U_i$ y $N$ es el número de reglas activas. Si $\sum w_i = 0$, la salida es $u = 0$.
 
-El ángulo objetivo del tablero se calcula como:
+El método de implicación utilizado es el mínimo (Mamdani), donde la salida de cada regla se recorta por su fuerza de activación:
 \begin{equation}
-    \theta_{\text{target}} = \text{clip}(-u, -\theta_{\max}, \theta_{\max})
+    \mu_{U_i}^{\text{recortada}}(u) = \min(w_i, \mu_{U_i}(u))
 \end{equation}
-donde $\theta_{\max} = 45°$ es el límite máximo de inclinación.
 
-\subsubsection{Cinemática del Actuador}
+La agregación de todas las reglas activas se realiza mediante el operador máximo:
+\begin{equation}
+    \mu_{\text{agregada}}(u) = \max_{i=1}^{20} \mu_{U_i}^{\text{recortada}}(u)
+\end{equation}
+
+\subsubsection{Defuzzificación}
+La salida defuzzificada se obtiene mediante el método del centroide con una resolución de 1000 puntos:
+\begin{equation}
+    u = \frac{\int_{u_{\min}}^{u_{\max}} u \cdot \mu_{\text{agregada}}(u) \, du}{\int_{u_{\min}}^{u_{\max}} \mu_{\text{agregada}}(u) \, du}
+\end{equation}
+
+En la implementación discreta, esto se calcula como:
+\begin{equation}
+    u = \frac{\sum_{j=1}^{N} u_j \cdot \mu_{\text{agregada}}(u_j)}{\sum_{j=1}^{N} \mu_{\text{agregada}}(u_j)}
+\end{equation}
+donde $N = 1000$ es la resolución de defuzzificación y $u_j$ son puntos equiespaciados en el rango de salida. Si el denominador es cero, la salida es $u = 0$.
+
+\subsubsection{Conversión a Ángulo Objetivo y Cinemática del Actuador}
+El ángulo objetivo del tablero se calcula limitando la salida defuzzificada:
+\begin{equation}
+    \theta_{\text{target}} = \text{clip}(u, -\theta_{\max}, \theta_{\max})
+\end{equation}
+donde $\theta_{\max} = 45°$ ($0.785$ rad) es el límite máximo de inclinación.
+
 El controlador limita la velocidad angular del actuador mediante:
 \begin{equation}
     \omega = \text{clip}\left(\frac{\theta_{\text{target}} - \theta}{\Delta t}, -\omega_{\max}, \omega_{\max}\right)
 \end{equation}
-donde $\omega_{\max} = 8$ rad/s. La actualización del ángulo se realiza mediante integración de Euler:
+donde $\omega_{\max} = 3$ rad/s es la velocidad angular máxima permitida. La actualización del ángulo se realiza mediante integración de Euler:
 \begin{equation}
     \theta(t+\Delta t) = \theta(t) + \omega \Delta t
 \end{equation}
@@ -474,113 +653,102 @@ donde $\omega_{\max} = 8$ rad/s. La actualización del ángulo se realiza median
 
 \begin{figure}[H]
     \centering
-    \begin{tikzpicture}[scale=1.2]
-        % Error membership functions
+    \begin{tikzpicture}[scale=1.0]
+        % Error membership functions (9 MFs)
         \begin{scope}[xshift=0cm]
-            \draw[->] (-0.7,0) -- (0.7,0) node[right] {$e$};
+            \draw[->] (-0.5,0) -- (0.5,0) node[right] {$e$ (m)};
             \draw[->] (0,0) -- (0,1.3) node[above] {$\mu(e)$};
             
-            % Define centers
-            \def\nb{-0.5}
-            \def\ns{-0.25}
+            % Simplified representation: show key membership functions
+            \def\gn{-0.29}
+            \def\mn{-0.22}
+            \def\pn{-0.15}
+            \def\mpn{-0.05}
             \def\z{0.0}
-            \def\ps{0.25}
-            \def\pb{0.5}
+            \def\mpp{0.05}
+            \def\pp{0.15}
+            \def\mp{0.22}
+            \def\gp{0.29}
             
-            % NB triangle
-            \draw[thick, blue] (\nb-0.25,0) -- (\nb,1) -- (\nb+0.25,0);
-            \node[below] at (\nb, 0) {NB};
+            % Draw a few representative triangles
+            \draw[thick, blue] (\gn-0.06,0) -- (\gn,1) -- (\gn+0.06,0);
+            \node[below, font=\tiny] at (\gn, 0) {gN};
+            \draw[thick, green!60!black] (\mn-0.06,0) -- (\mn,1) -- (\mn+0.06,0);
+            \node[below, font=\tiny] at (\mn, 0) {mN};
+            \draw[thick, orange] (\z-0.01,0) -- (\z,1) -- (\z+0.01,0);
+            \node[below, font=\tiny] at (\z, 0) {Z};
+            \draw[thick, purple] (\mp,1) -- (\mp+0.06,0);
+            \draw[thick, purple] (\mp-0.06,0) -- (\mp,1);
+            \node[below, font=\tiny] at (\mp, 0) {mP};
+            \draw[thick, red] (\gp-0.06,0) -- (\gp,1) -- (\gp+0.06,0);
+            \node[below, font=\tiny] at (\gp, 0) {gP};
             
-            % NS triangle
-            \draw[thick, green!60!black] (\ns-0.25,0) -- (\ns,1) -- (\ns+0.25,0);
-            \node[below] at (\ns, 0) {NS};
-            
-            % Z triangle
-            \draw[thick, orange] (\z-0.25,0) -- (\z,1) -- (\z+0.25,0);
-            \node[below] at (\z, 0) {Z};
-            
-            % PS triangle
-            \draw[thick, purple] (\ps-0.25,0) -- (\ps,1) -- (\ps+0.25,0);
-            \node[below] at (\ps, 0) {PS};
-            
-            % PB triangle
-            \draw[thick, red] (\pb-0.25,0) -- (\pb,1) -- (\pb+0.25,0);
-            \node[below] at (\pb, 0) {PB};
-            
-            \node[above] at (0, 1.3) {\textbf{Error de Posición}};
+            \node[above] at (0, 1.3) {\textbf{Error (9 MFs)}};
         \end{scope}
         
-        % Velocity membership functions
+        % Velocity membership functions (5 MFs with trapinf edges)
         \begin{scope}[xshift=4cm]
-            \draw[->] (-1.2,0) -- (1.2,0) node[right] {$v_{x,g}$};
+            \draw[->] (-0.5,0) -- (0.5,0) node[right] {$v_l$ (m/s)};
             \draw[->] (0,0) -- (0,1.3) node[above] {$\mu(v)$};
             
-            % Define centers
-            \def\nb{-1.0}
-            \def\ns{-0.75}
+            % Simplified representation
+            \def\rn{-0.2125}
+            \def\ln{-0.085}
             \def\z{0.0}
-            \def\ps{0.75}
-            \def\pb{1.0}
+            \def\lp{0.085}
+            \def\rp{0.2125}
             
-            % NB triangle
-            \draw[thick, blue] (\nb-0.25,0) -- (\nb,1) -- (\nb+0.25,0);
-            \node[below] at (\nb, 0) {NB};
+            % Left trapinf (rapidaNeg) - extends to -inf
+            \draw[thick, blue] (-0.5,1) -- (\rn,1) -- (\rn+0.0375,0);
+            \node[below, font=\tiny] at (\rn, 0) {rN};
             
-            % NS triangle
-            \draw[thick, green!60!black] (\ns-0.25,0) -- (\ns,1) -- (\ns+0.25,0);
-            \node[below] at (\ns, 0) {NS};
+            % Regular triangles
+            \draw[thick, green!60!black] (\ln-0.085,0) -- (\ln,1) -- (\ln+0.085,0);
+            \node[below, font=\tiny] at (\ln, 0) {lN};
+            \draw[thick, orange] (\z-0.255,0) -- (\z,1) -- (\z+0.255,0);
+            \node[below, font=\tiny] at (\z, 0) {Z};
+            \draw[thick, purple] (\lp-0.085,0) -- (\lp,1) -- (\lp+0.085,0);
+            \node[below, font=\tiny] at (\lp, 0) {lP};
             
-            % Z triangle
-            \draw[thick, orange] (\z-0.25,0) -- (\z,1) -- (\z+0.25,0);
-            \node[below] at (\z, 0) {Z};
+            % Right trapinf (rapidaPos) - extends to +inf
+            \draw[thick, red] (\rp-0.0375,0) -- (\rp,1) -- (0.5,1);
+            \node[below, font=\tiny] at (\rp, 0) {rP};
             
-            % PS triangle
-            \draw[thick, purple] (\ps-0.25,0) -- (\ps,1) -- (\ps+0.25,0);
-            \node[below] at (\ps, 0) {PS};
-            
-            % PB triangle
-            \draw[thick, red] (\pb-0.25,0) -- (\pb,1) -- (\pb+0.25,0);
-            \node[below] at (\pb, 0) {PB};
-            
-            \node[above] at (0, 1.3) {\textbf{Velocidad Global}};
+            \node[above] at (0, 1.3) {\textbf{Velocidad (5 MFs)}};
         \end{scope}
         
-        % Output membership functions
+        % Output membership functions (9 MFs)
         \begin{scope}[xshift=8cm]
-            \draw[->] (-1.2,0) -- (1.2,0) node[right] {$u$};
+            \draw[->] (-0.6,0) -- (0.6,0) node[right] {$u$ (rad)};
             \draw[->] (0,0) -- (0,1.3) node[above] {$\mu(u)$};
             
-            % Define centers
-            \def\nb{-1.0}
-            \def\ns{-0.75}
+            % Simplified representation
+            \def\gmn{-0.4}
+            \def\gmen{-0.3}
+            \def\gpn{-0.2}
+            \def\gmpn{-0.1}
             \def\z{0.0}
-            \def\ps{0.75}
-            \def\pb{1.0}
+            \def\gmpp{0.1}
+            \def\gpp{0.2}
+            \def\gmp{0.3}
+            \def\gmppos{0.4}
             
-            % NB triangle
-            \draw[thick, blue] (\nb-0.25,0) -- (\nb,1) -- (\nb+0.25,0);
-            \node[below] at (\nb, 0) {NB};
+            % Draw a few representative triangles
+            \draw[thick, blue] (\gmn-0.0833,0) -- (\gmn,1) -- (\gmn+0.0833,0);
+            \node[below, font=\tiny] at (\gmn, 0) {gMN};
+            \draw[thick, green!60!black] (\gmen-0.0833,0) -- (\gmen,1) -- (\gmen+0.0833,0);
+            \node[below, font=\tiny] at (\gmen, 0) {gMeN};
+            \draw[thick, orange] (\z-0.0833,0) -- (\z,1) -- (\z+0.0833,0);
+            \node[below, font=\tiny] at (\z, 0) {Z};
+            \draw[thick, purple] (\gmp-0.0833,0) -- (\gmp,1) -- (\gmp+0.0833,0);
+            \node[below, font=\tiny] at (\gmp, 0) {gMP};
+            \draw[thick, red] (\gmppos-0.0833,0) -- (\gmppos,1) -- (\gmppos+0.0833,0);
+            \node[below, font=\tiny] at (\gmppos, 0) {gMP};
             
-            % NS triangle
-            \draw[thick, green!60!black] (\ns-0.25,0) -- (\ns,1) -- (\ns+0.25,0);
-            \node[below] at (\ns, 0) {NS};
-            
-            % Z triangle
-            \draw[thick, orange] (\z-0.25,0) -- (\z,1) -- (\z+0.25,0);
-            \node[below] at (\z, 0) {Z};
-            
-            % PS triangle
-            \draw[thick, purple] (\ps-0.25,0) -- (\ps,1) -- (\ps+0.25,0);
-            \node[below] at (\ps, 0) {PS};
-            
-            % PB triangle
-            \draw[thick, red] (\pb-0.25,0) -- (\pb,1) -- (\pb+0.25,0);
-            \node[below] at (\pb, 0) {PB};
-            
-            \node[above] at (0, 1.3) {\textbf{Salida (Ángulo)}};
+            \node[above] at (0, 1.3) {\textbf{Inclinación (9 MFs)}};
         \end{scope}
     \end{tikzpicture}
-    \caption{Funciones de pertenencia triangulares para las variables de entrada y salida del controlador difuso.}
+    \caption{Representación esquemática de las funciones de pertenencia del controlador difuso. \textbf{Error:} 9 funciones triangulares (grandeNeg, medioNeg, pequeñoNeg, muyPequeñoNeg, cero, muyPequeñoPos, pequeñoPos, medioPos, grandePos). \textbf{Velocidad:} 5 funciones (rapidaNeg con trapinf izquierdo, lentaNeg, cero, lentaPos, rapidaPos con trapinf derecho). \textbf{Inclinación:} 9 funciones triangulares (giraMuchoNeg, giraMedioNeg, giraPocoNeg, giraMuyPocoNeg, cero, giraMuyPocoPos, giraPocoPos, giraMedioPos, giraMuchoPos).}
     \label{fig:fuzzy}
 \end{figure}
 
@@ -591,7 +759,7 @@ Se realizaron pruebas comparativas de los controladores en los cuatro niveles de
 A continuación, se muestra la trayectoria resultante de la moneda bajo la acción del control en el nivel de dificultad máxima.
 
 
-
+\subsubsection{Sliding mode}
 % PLACEHOLDER: Trayectoria XY
 \begin{figure}[H]
     \centering
@@ -605,11 +773,40 @@ A continuación, se muestra la trayectoria resultante de la moneda bajo la acci�
     \caption{Trayectoria de la moneda completando el circuito bajo control automático.}
     \label{fig:trayectoria}
 \end{figure}
-
+\subsubsection{Fuzzy logic}
+\begin{figure}[H]
+    \centering
+    % \includegraphics[width=0.8\textwidth]{ruta/a/trayectoria_final.png}
+    \fbox{\begin{minipage}{0.8\textwidth}
+        \centering
+        \vspace{1cm}
+        \textbf{[INSERTAR IMAGEN: Trayectorias XY de la moneda]}
+        \vspace{1cm}
+    \end{minipage}}
+    \caption{Trayectoria de la moneda completando el circuito bajo control automático.}
+    \label{fig:trayectoria}
+\end{figure}
 \subsection{Respuesta del Actuador}
 Se analizó la suavidad y el esfuerzo de control observando la evolución del ángulo $\theta$ y la velocidad angular $\dot{\theta}$.
 
 
+\subsubsection{Sliding mode}
+
+% PLACEHOLDER: Gráficas de Theta y Theta_dot
+\begin{figure}[H]
+    \centering
+    % \includegraphics[width=0.8\textwidth]{ruta/a/control_signals.png}
+    \fbox{\begin{minipage}{0.8\textwidth}
+        \centering
+        \vspace{1cm}
+        \textbf{[INSERTAR IMAGEN: Gráficas de ángulo y velocidad angular]}
+        \vspace{1cm}
+    \end{minipage}}
+    \caption{Evolución del ángulo de inclinación y la velocidad angular durante la partida.}
+    \label{fig:actuador}
+\end{figure}
+
+\subsubsection{Fuzzy}
 
 % PLACEHOLDER: Gráficas de Theta y Theta_dot
 \begin{figure}[H]
@@ -649,9 +846,10 @@ La siguiente tabla resume el rendimiento de los controladores medido en tiempo n
 Se ha logrado desarrollar un simulador fiel en Python que reproduce la dinámica no lineal de la recreativa Monza.
 \begin{itemize}
     \item El modelo físico incluye fricción compleja y rebotes inelásticos, permitiendo una simulación realista.
-    \item El controlador **Fuzzy** demostró ser el más rápido y robusto en términos generales debido a su naturaleza intuitiva y agresiva.
-    \item El controlador **SMC** garantiza estabilidad teórica pero resultó ser más conservador y lento.
+    \item El controlador \textbf{Fuzzy} demostró ser el más rápido y robusto en términos generales debido a su naturaleza intuitiva y agresiva.
+    \item El controlador \textbf{SMC} garantiza estabilidad teórica pero resultó ser más conservador y lento.
 \end{itemize}
 
 Como limitación principal, el modelo actual permite aceleraciones angulares infinitas en el actuador. Una línea futura de trabajo sería incluir la dinámica del motor (par) para restringir la aceleración $\alpha$, acercando aún más la simulación a la realidad física.
+\bibliography{sample}
 \end{document}
