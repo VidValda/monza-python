@@ -863,6 +863,7 @@ class Dashboard:
 
     def _setup_track_view(self):
         ax = self.fig.add_subplot(self.gs[0:3, 0:2])
+        self.track_ax = ax
         ax.set_title("Simulation Track", fontsize=14, fontweight='bold', pad=10)
         ax.set_xlim(-0.3, 0.3); ax.set_ylim(-0.3, 0.3); ax.set_aspect('equal')
         ax.grid(True, alpha=0.3)
@@ -883,6 +884,7 @@ class Dashboard:
 
     def _setup_heatmap(self):
         ax = self.fig.add_subplot(self.gs[0:1, 2:3])
+        self.heatmap_ax = ax
         ax.set_title("Active Rules Matrix", fontsize=12, fontweight='bold', pad=8)
         ax.set_xlabel("Error", fontsize=10); ax.set_ylabel("Velocidad", fontsize=10)
         # Error has 9 MFs, Velocidad has 5 MFs
@@ -893,6 +895,7 @@ class Dashboard:
 
     def _setup_defuzz_view(self):
         ax = self.fig.add_subplot(self.gs[2:3, 2:3])
+        self.defuzz_ax = ax
         ax.set_title("Defuzzification", fontsize=12, fontweight='bold', pad=8)
         ax.set_xlim(-0.5, 0.5); ax.set_ylim(0, 1.1)
         ax.grid(True, alpha=0.3)
@@ -936,7 +939,7 @@ class Dashboard:
         
         line = ax.axvline(0, color='red', lw=1.5)
         dots, = ax.plot([], [], f'{color[0]}o', markersize=4)
-        return line, dots
+        return ax, line, dots
 
     def _setup_setpoint_plot(self):
         ax = self.fig.add_subplot(self.gs[3:4, 0:3])
@@ -1003,6 +1006,7 @@ class Dashboard:
 
     def _setup_state_info(self):
         ax = self.fig.add_subplot(self.gs[1:2, 3:5])
+        self.state_ax = ax
         ax.axis('off')
         ax.set_title("System State", fontsize=12, fontweight='bold', pad=-30, loc='left')
         self.state_text = ax.text(0.1, 0.9, '', transform=ax.transAxes, fontsize=10,
@@ -1010,14 +1014,14 @@ class Dashboard:
                                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.6, pad=8))
 
     def _setup_fuzz_pos(self):
-        self.line_p, self.dots_p = self._setup_fuzz_plot(
+        self.fuzz_pos_ax, self.line_p, self.dots_p = self._setup_fuzz_plot(
             self.gs[5:6, 0:1], "Fuzzification: Error", 
             self.fuzzy.error_mfs, self.fuzzy.error_labels, 
             self.fuzzy.error_range, 'blue'
         )
 
     def _setup_fuzz_vel(self):
-        self.line_v, self.dots_v = self._setup_fuzz_plot(
+        self.fuzz_vel_ax, self.line_v, self.dots_v = self._setup_fuzz_plot(
             self.gs[5:6, 1:2], "Fuzzification: Velocidad", 
             self.fuzzy.velocidad_mfs, self.fuzzy.velocidad_labels,
             self.fuzzy.velocidad_range, 'green'
@@ -1025,6 +1029,7 @@ class Dashboard:
 
     def _setup_output_mf_view(self):
         ax = self.fig.add_subplot(self.gs[5:6, 2:3])
+        self.output_mf_ax = ax
         ax.set_title("Output MFs: Inclinación", fontsize=11, fontweight='bold', pad=6)
         ax.set_ylim(0, 1.1)
         ax.set_xlim(self.fuzzy.inclinacion_range[0] * 1.2, self.fuzzy.inclinacion_range[1] * 1.2)
@@ -1208,6 +1213,360 @@ class Dashboard:
             self.line_v, self.dots_v, self.heatmap_img, self.defuzz_out_line,
             self.output_line, self.state_text
         ] + list(self.out_bars))
+
+    def save_final_frame(self, filename: str = 'results/dashboard_final.png'):
+        """
+        Save the final frame of the simulation to a file.
+        
+        Args:
+            filename: Path to save the figure
+        """
+        import os
+        os.makedirs('results', exist_ok=True)
+        
+        # Update to final frame
+        final_frame = len(self.history['x']) - 1
+        if final_frame >= 0:
+            self.update_frame(final_frame)
+            self.fig.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+            print(f"Dashboard plot saved to {filename}")
+
+    def save_all_subplots(self):
+        """
+        Save each subplot as a separate figure with proper size and spacing.
+        """
+        import os
+        os.makedirs('results', exist_ok=True)
+        
+        # Update to final frame first
+        final_frame = len(self.history['x']) - 1
+        if final_frame < 0:
+            return
+        
+        self.update_frame(final_frame)
+        
+        # Get debug info for final frame
+        debug_info = self.history['debug'][final_frame] if final_frame < len(self.history['debug']) and self.history['debug'][final_frame] else None
+        
+        # 1. Track View
+        self._save_track_view(final_frame)
+        
+        # 2. Heatmap
+        if debug_info:
+            self._save_heatmap(debug_info)
+        
+        # 3. Defuzzification
+        if debug_info:
+            self._save_defuzz_view(debug_info)
+        
+        # 4. Position Tracking
+        self._save_setpoint_plot()
+        
+        # 5. Velocity Plot
+        self._save_velocity_plot()
+        
+        # 6. Control Output Plot
+        self._save_control_output_plot()
+        
+        # 7. Platform Angle Plot
+        self._save_platform_angle_plot()
+        
+        # 8. Phase Plot
+        self._save_phase_plot()
+        
+        # 9. Fuzzification: Error
+        if debug_info:
+            self._save_fuzz_pos_plot(debug_info, final_frame)
+        
+        # 10. Fuzzification: Velocidad
+        if debug_info:
+            self._save_fuzz_vel_plot(debug_info, final_frame)
+        
+        # 11. Output MFs
+        if debug_info:
+            self._save_output_mf_plot(debug_info)
+        
+        print("All subplots saved to results/ folder")
+
+    def _save_track_view(self, frame: int):
+        """Save track view subplot."""
+        fig, ax = plt.subplots(figsize=(10, 10))
+        ax.set_title("Simulation Track", fontsize=16, fontweight='bold', pad=15)
+        ax.set_xlim(-0.3, 0.3)
+        ax.set_ylim(-0.3, 0.3)
+        ax.set_aspect('equal')
+        ax.grid(True, alpha=0.3)
+        ax.set_xlabel("X Position (m)", fontsize=14)
+        ax.set_ylabel("Y Position (m)", fontsize=14)
+        
+        # Plot track segments
+        angle = self.history['angle'][frame]
+        for local_x, local_y in self.level.visual_segments:
+            global_x, global_y = rotate_vector(local_x, local_y, angle)
+            ax.plot(global_x, global_y, 'k-', lw=2)
+        
+        # Plot setpoints
+        setpoints_x, setpoints_y = get_all_setpoints_for_level(self.config.nivel)
+        ax.plot(setpoints_x, setpoints_y, 'g*', markersize=15, label='Setpoints', zorder=5, alpha=0.7)
+        
+        # Plot current setpoint
+        if frame < len(self.history['setpoint']):
+            current_setpoint_x = self.history['setpoint'][frame]
+            closest_idx = np.argmin(np.abs(setpoints_x - current_setpoint_x))
+            ax.plot([setpoints_x[closest_idx]], [setpoints_y[closest_idx]], 'gX', 
+                   markersize=18, label='Current Target', zorder=6, markeredgewidth=2)
+        
+        # Plot ball trajectory
+        trace_len = min(TRACE_LENGTH, frame + 1)
+        start_idx = max(0, frame - trace_len + 1)
+        ax.plot(self.history['x'][start_idx:frame + 1], 
+               self.history['y'][start_idx:frame + 1], 
+               'r-', lw=2, alpha=0.6, label='Trajectory')
+        
+        # Plot current ball position
+        ax.plot([self.history['x'][frame]], [self.history['y'][frame]], 
+               'ro', markersize=12, label='Ball', zorder=10)
+        
+        ax.legend(loc='upper right', fontsize=12)
+        plt.tight_layout()
+        plt.savefig('results/track_view.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+    def _save_heatmap(self, debug_info: Dict):
+        """Save heatmap subplot."""
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title("Active Rules Matrix", fontsize=16, fontweight='bold', pad=15)
+        ax.set_xlabel("Error", fontsize=14)
+        ax.set_ylabel("Velocidad", fontsize=14)
+        
+        grid = np.zeros((5, 9))
+        for rule in debug_info['rules']:
+            velocidad_idx = self.fuzzy.velocidad_labels.index(rule['velocidad_mf'])
+            error_idx = self.fuzzy.error_labels.index(rule['error_mf'])
+            grid[velocidad_idx, error_idx] = max(grid[velocidad_idx, error_idx], rule['strength'])
+        
+        im = ax.imshow(grid, cmap='Reds', vmin=0, vmax=1, origin='lower', aspect='auto')
+        ax.set_xticks(range(9))
+        ax.set_xticklabels([l[:4] for l in self.fuzzy.error_labels], rotation=45, fontsize=12)
+        ax.set_yticks(range(5))
+        ax.set_yticklabels([l[:4] for l in self.fuzzy.velocidad_labels], fontsize=12)
+        plt.colorbar(im, ax=ax, label='Rule Strength')
+        plt.tight_layout()
+        plt.savefig('results/heatmap.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+    def _save_defuzz_view(self, debug_info: Dict):
+        """Save defuzzification subplot."""
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title("Defuzzification", fontsize=16, fontweight='bold', pad=15)
+        ax.set_xlim(-0.5, 0.5)
+        ax.set_ylim(0, 1.1)
+        ax.grid(True, alpha=0.3)
+        ax.set_xlabel("Inclinación (rad)", fontsize=14)
+        ax.set_ylabel("Membership", fontsize=14)
+        
+        output_centers = [self.fuzzy.inclinacion_mfs[label][1] for label in self.fuzzy.inclinacion_labels]
+        for i, (label, center) in enumerate(zip(self.fuzzy.inclinacion_labels, output_centers)):
+            ax.axvline(center, color='gray', linestyle=':', alpha=0.5)
+            ax.text(center, 1.02, label[:4], ha='center', fontsize=10, rotation=45)
+        
+        bar_heights = [0] * 9
+        for rule in debug_info['rules']:
+            inclinacion_idx = self.fuzzy.inclinacion_labels.index(rule['inclinacion_mf'])
+            bar_heights[inclinacion_idx] = max(bar_heights[inclinacion_idx], rule['strength'])
+        
+        ax.bar(output_centers, bar_heights, width=0.02, color='blue', alpha=0.6)
+        ax.axvline(debug_info['output'], color='red', lw=3, label='Output')
+        ax.legend(fontsize=12)
+        plt.tight_layout()
+        plt.savefig('results/defuzzification.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+    def _save_setpoint_plot(self):
+        """Save position tracking plot."""
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.set_title("Position Tracking", fontsize=16, fontweight='bold', pad=15)
+        ax.set_xlabel("Time Step", fontsize=14)
+        ax.set_ylabel("Position (m)", fontsize=14)
+        ax.grid(True, alpha=0.3)
+        
+        time_steps = list(range(len(self.history['x'])))
+        ax.plot(time_steps, self.history['setpoint'], 'g--', lw=2.5, label='Setpoint', 
+               alpha=0.8, marker='o', markersize=4, markevery=max(1, len(time_steps)//20))
+        ax.plot(time_steps, self.history['x'], 'b-', lw=2, label='Position', alpha=0.8)
+        ax.plot(time_steps, self.history['error'], 'r-', lw=2, label='Error', alpha=0.7)
+        ax.legend(loc='best', fontsize=12)
+        plt.tight_layout()
+        plt.savefig('results/position_tracking.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+    def _save_velocity_plot(self):
+        """Save velocity plot."""
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title("Velocity", fontsize=16, fontweight='bold', pad=15)
+        ax.set_xlabel("Time Step", fontsize=14)
+        ax.set_ylabel("Velocity (m/s)", fontsize=14)
+        ax.grid(True, alpha=0.3)
+        
+        time_steps = list(range(len(self.history['x'])))
+        ax.plot(time_steps, self.history['global_vx'], 'm-', lw=2, label='Global Vx', alpha=0.8)
+        ax.plot(time_steps, self.history['lv'], 'c--', lw=2, label='Local V', alpha=0.7)
+        ax.legend(loc='best', fontsize=12)
+        plt.tight_layout()
+        plt.savefig('results/velocity.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+    def _save_control_output_plot(self):
+        """Save control output plot."""
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title("Control Output", fontsize=16, fontweight='bold', pad=15)
+        ax.set_xlabel("Time Step", fontsize=14)
+        ax.set_ylabel("Inclinación (rad)", fontsize=14)
+        ax.grid(True, alpha=0.3)
+        
+        time_steps = list(range(len(self.history['x'])))
+        control_outputs = [
+            d['output'] if d else 0.0
+            for d in self.history['debug']
+        ]
+        ax.plot(time_steps, control_outputs, 'orange', lw=2, label='Fuzzy Output', alpha=0.8)
+        ax.axhline(0, color='k', linestyle=':', alpha=0.3)
+        ax.legend(loc='best', fontsize=12)
+        plt.tight_layout()
+        plt.savefig('results/control_output.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+    def _save_platform_angle_plot(self):
+        """Save platform angle plot."""
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title("Platform Angle", fontsize=16, fontweight='bold', pad=15)
+        ax.set_xlabel("Time Step", fontsize=14)
+        ax.set_ylabel("Angle", fontsize=14)
+        ax.grid(True, alpha=0.3)
+        
+        time_steps = list(range(len(self.history['x'])))
+        angles = self.history['angle']
+        angles_deg = [np.degrees(a) for a in angles]
+        ax.plot(time_steps, angles, 'purple', lw=2, label='Platform Angle (rad)', alpha=0.8)
+        ax2 = ax.twinx()
+        ax2.plot(time_steps, angles_deg, 'brown', lw=2, linestyle='--', label='Angle (deg)', alpha=0.7)
+        ax2.set_ylabel("Angle (deg)", fontsize=14)
+        ax.axhline(0, color='k', linestyle=':', alpha=0.3)
+        ax.legend(loc='upper left', fontsize=12)
+        ax2.legend(loc='upper right', fontsize=12)
+        plt.tight_layout()
+        plt.savefig('results/platform_angle.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+    def _save_phase_plot(self):
+        """Save phase plot."""
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ax.set_title("Phase Plot", fontsize=16, fontweight='bold', pad=15)
+        ax.set_xlabel("Error (m)", fontsize=14)
+        ax.set_ylabel("Velocity (m/s)", fontsize=14)
+        ax.grid(True, alpha=0.3)
+        
+        phase_trace_len = min(PHASE_TRACE_LENGTH, len(self.history['error']))
+        phase_start = max(0, len(self.history['error']) - phase_trace_len)
+        phase_errors = self.history['error'][phase_start:]
+        phase_vels = self.history['global_vx'][phase_start:]
+        
+        ax.plot(phase_errors, phase_vels, 'b-', lw=2, alpha=0.6, label='Trajectory')
+        if len(phase_errors) > 0:
+            ax.plot([phase_errors[-1]], [phase_vels[-1]], 'ro', markersize=10, label='Current', zorder=10)
+        ax.axhline(0, color='k', linestyle=':', alpha=0.3, linewidth=1)
+        ax.axvline(0, color='k', linestyle=':', alpha=0.3, linewidth=1)
+        ax.legend(loc='best', fontsize=12)
+        plt.tight_layout()
+        plt.savefig('results/phase_plot.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+    def _save_fuzz_pos_plot(self, debug_info: Dict, frame: int):
+        """Save fuzzification error plot."""
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title("Fuzzification: Error", fontsize=16, fontweight='bold', pad=15)
+        ax.set_ylim(0, 1.1)
+        ax.set_xlim(self.fuzzy.error_range[0] * 1.2, self.fuzzy.error_range[1] * 1.2)
+        ax.set_xlabel("Error", fontsize=14)
+        ax.set_ylabel("Membership", fontsize=14)
+        ax.grid(True, alpha=0.3)
+        
+        # Draw membership functions
+        x_static = np.linspace(self.fuzzy.error_range[0] * 1.2, self.fuzzy.error_range[1] * 1.2, 200)
+        for label in self.fuzzy.error_labels:
+            abc = self.fuzzy.error_mfs[label]
+            y = [self.fuzzy._trimf(xi, abc) for xi in x_static]
+            ax.plot(x_static, y, 'k-', lw=1, alpha=0.5)
+            ax.fill_between(x_static, 0, y, alpha=0.1, color='blue')
+        
+        # Draw current value and memberships
+        error_val = self.history['error'][frame]
+        ax.axvline(error_val, color='red', lw=2.5, label='Current Value')
+        error_memberships = [debug_info['m_error'][k] for k in self.fuzzy.error_labels]
+        ax.plot([error_val] * len(self.fuzzy.error_labels), error_memberships, 'bo', markersize=8)
+        ax.legend(fontsize=12)
+        plt.tight_layout()
+        plt.savefig('results/fuzzification_error.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+    def _save_fuzz_vel_plot(self, debug_info: Dict, frame: int):
+        """Save fuzzification velocidad plot."""
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title("Fuzzification: Velocidad", fontsize=16, fontweight='bold', pad=15)
+        ax.set_ylim(0, 1.1)
+        ax.set_xlim(self.fuzzy.velocidad_range[0] * 1.2, self.fuzzy.velocidad_range[1] * 1.2)
+        ax.set_xlabel("Velocidad", fontsize=14)
+        ax.set_ylabel("Membership", fontsize=14)
+        ax.grid(True, alpha=0.3)
+        
+        # Draw membership functions
+        x_static = np.linspace(self.fuzzy.velocidad_range[0] * 1.2, self.fuzzy.velocidad_range[1] * 1.2, 200)
+        for label in self.fuzzy.velocidad_labels:
+            abc = self.fuzzy.velocidad_mfs[label]
+            if label == 'rapidaNeg':
+                y = [self.fuzzy._trapinf(xi, abc, is_left_edge=True) for xi in x_static]
+            elif label == 'rapidaPos':
+                y = [self.fuzzy._trapinf(xi, abc, is_left_edge=False) for xi in x_static]
+            else:
+                y = [self.fuzzy._trimf(xi, abc) for xi in x_static]
+            ax.plot(x_static, y, 'k-', lw=1, alpha=0.5)
+            ax.fill_between(x_static, 0, y, alpha=0.1, color='green')
+        
+        # Draw current value and memberships
+        velocidad_val = self.history['global_vx'][frame]
+        ax.axvline(velocidad_val, color='red', lw=2.5, label='Current Value')
+        velocidad_memberships = [debug_info['m_velocidad'][k] for k in self.fuzzy.velocidad_labels]
+        ax.plot([velocidad_val] * len(self.fuzzy.velocidad_labels), velocidad_memberships, 'go', markersize=8)
+        ax.legend(fontsize=12)
+        plt.tight_layout()
+        plt.savefig('results/fuzzification_velocidad.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+    def _save_output_mf_plot(self, debug_info: Dict):
+        """Save output membership functions plot."""
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title("Output MFs: Inclinación", fontsize=16, fontweight='bold', pad=15)
+        ax.set_ylim(0, 1.1)
+        ax.set_xlim(self.fuzzy.inclinacion_range[0] * 1.2, self.fuzzy.inclinacion_range[1] * 1.2)
+        ax.set_xlabel("Inclinación (rad)", fontsize=14)
+        ax.set_ylabel("Membership", fontsize=14)
+        ax.grid(True, alpha=0.3)
+        
+        # Draw membership functions
+        x_static = np.linspace(self.fuzzy.inclinacion_range[0] * 1.2, 
+                              self.fuzzy.inclinacion_range[1] * 1.2, 200)
+        for label in self.fuzzy.inclinacion_labels:
+            abc = self.fuzzy.inclinacion_mfs[label]
+            y = [self.fuzzy._trimf(xi, abc) for xi in x_static]
+            ax.plot(x_static, y, 'k-', lw=1, alpha=0.5)
+            ax.fill_between(x_static, 0, y, alpha=0.1, color='orange')
+        
+        # Draw output value
+        ax.axvline(debug_info['output'], color='red', lw=3, label='Output')
+        ax.legend(fontsize=12)
+        plt.tight_layout()
+        plt.savefig('results/output_mfs.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
 
     def show(self):
         """Display the animation."""
