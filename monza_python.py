@@ -25,7 +25,7 @@ from typing import Dict, List, Tuple, Optional
 # Floor indices: 0-6 (Python 0-based, corresponds to MATLAB floors 2-8)
 SETPOINTS = np.array([
     # Level 1 (index 0)
-    [[0, 0, 0, 0, 0, 0, -0.02554],
+    [[0, 0, 0, -0.005, 0, 0.01, -0.02554],
      [0.11429, 0.06857, 0.02286, -0.02286, -0.06857, -0.11429, -0.16035]],
     # Level 2 (index 1)
     [[0.06211, -0.04758, 0.04969, -0.04847, 0.04406, -0.05409, -0.02554],
@@ -42,7 +42,7 @@ SETPOINTS = np.array([
 NUM_LEVELS = 4
 NUM_FLOORS = 7
 DEFAULT_SAMPLING_TIME = 0.033  # seconds
-DEFAULT_SIMULATION_DURATION = 15 # seconds
+DEFAULT_SIMULATION_DURATION = 12 # seconds
 EPSILON = 1e-9  # Small value to avoid division by zero
 MIN_VELOCITY_FOR_STICK = 0.5  # m/s threshold for ball to stick to floor
 PENETRATION_FIX_OFFSET = 0.001  # meters
@@ -66,7 +66,7 @@ class PhysicsParams:
 @dataclass
 class SimulationConfig:
     """Main simulation configuration."""
-    diff_path: str = 'dificultad3.json'
+    diff_path: str = 'dificultad4.json'
     circ_path: str = 'circulos.json'
     duration_steps: int = 2000
     max_tilt: float = 45.0    # Maximum tilt angle in degrees
@@ -577,7 +577,7 @@ class FuzzyController:
             'rapidaPos': [0.2, 0.25, 10.0]      # trapinf: extends to +inf on right
         }
         # Apply scale factor
-        VELOCIDAD_MF_SCALE = 0.5
+        VELOCIDAD_MF_SCALE = 0.85
         self.velocidad_mfs = {
             label: [v * VELOCIDAD_MF_SCALE for v in values]
             for label, values in velocidad_mfs_base.items()
